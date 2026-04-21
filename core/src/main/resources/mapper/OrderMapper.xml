@@ -38,11 +38,11 @@
         WHERE order_no = #{orderNo}
     </select>
 
-    <!-- 更新订单状态 -->
+    <!-- 更新订单状态（带前置条件：只有 status=0 待支付才允许取消，防止并发重复操作） -->
     <update id="updateStatus">
         UPDATE `order`
-        SET status = #{status}
-        WHERE id = #{id}
+        SET status = #{status}, update_time = NOW()
+        WHERE id = #{id} AND status = 0
     </update>
 
     <!-- 查询已过期待支付订单（status=0 且 expire_time < expireTime） -->
