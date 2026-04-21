@@ -1,5 +1,18 @@
 package com.ticket.common.constant;
 
+/**
+ * Redis Key 常量工具类.
+ *
+ * 统一管理所有 Redis 操作的 key 格式,避免散落在各处硬编码.
+ * 每个方法对应一种 key 模式:
+ *   sessionSeats      — Set,存储场次下所有可售座位 ID
+ *   seatInfo          — Hash,存储座位详细信息(排号/列号/价格等)
+ *   seatLock          — String,座位锁(NX+EXPIRE 实现分布式锁)
+ *   sessionPurchase   — String,用户在某场次的已购数量
+ *   ticketOrderQueue  — Redis Stream,订单削峰队列
+ *   userRateLimit     — String,用户限流计数
+ *   sessionLock       — String,场次级分布式锁
+ */
 public class RedisKeys {
 
     private RedisKeys() {}

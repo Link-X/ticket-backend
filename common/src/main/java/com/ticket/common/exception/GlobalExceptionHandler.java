@@ -6,6 +6,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+/**
+ * 全局异常处理器.
+ *
+ * 使用 @RestControllerAdvice 拦截所有 Controller 抛出的异常:
+ * - BusinessException → 返回业务错误码和消息
+ * - Exception → 兜底处理,返回系统内部错误
+ */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 

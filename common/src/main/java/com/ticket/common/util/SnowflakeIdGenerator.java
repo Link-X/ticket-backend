@@ -1,8 +1,19 @@
 package com.ticket.common.util;
 
+/**
+ * 雪花算法分布式 ID 生成器.
+ *
+ * 生成 64 位 long 型 ID,由以下部分组成:
+ *   - 时间戳(毫秒): 41 位
+ *   - 数据中心 ID: 5 位 (0~31)
+ *   - 工作机器 ID: 5 位 (0~31)
+ *   - 序列号: 12 位 (0~4095)
+ *
+ * 通过 workerId 和 dataCenterId 区分不同节点,保证全局 ID 不重复且递增有序.
+ */
 public class SnowflakeIdGenerator {
 
-    private static final long EPOCH = 1609459200000L; // 2021-01-01
+    private static final long EPOCH = 1609459200000L; // 起始时间戳: 2021-01-01
 
     private static final long WORKER_ID_BITS = 5L;
     private static final long DATA_CENTER_ID_BITS = 5L;

@@ -1,5 +1,11 @@
 package com.ticket.common.exception;
 
+/**
+ * 错误码枚举.
+ *
+ * 定义系统级错误码(500/400/401 等)和业务级错误码(1001~1008).
+ * 业务错误码以 1xxx 开头,与 HTTP 状态码区分.
+ */
 public enum ErrorCode {
 
     SYSTEM_ERROR(500, "系统内部错误"),
@@ -8,6 +14,7 @@ public enum ErrorCode {
     FORBIDDEN(403, "禁止访问"),
     NOT_FOUND(404, "资源不存在"),
 
+    // --- 业务错误码 ---
     SEAT_NOT_AVAILABLE(1001, "座位不可用"),
     EXCEED_PURCHASE_LIMIT(1002, "超过限购数量"),
     TICKET_ALREADY_USED(1003, "票已使用"),

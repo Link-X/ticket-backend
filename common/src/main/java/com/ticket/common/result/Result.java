@@ -2,6 +2,12 @@ package com.ticket.common.result;
 
 import java.io.Serializable;
 
+/**
+ * 统一接口响应封装类.
+ *
+ * 所有 REST 接口返回此对象,包含 code(状态码)、message(描述信息)、data(业务数据).
+ * 泛型 T 允许承载任意类型的业务数据.
+ */
 public class Result<T> implements Serializable {
 
     private int code;
