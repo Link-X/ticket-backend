@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.ticket.core.mapper.TicketMapper">
+
+    <!-- 票券结果映射 -->
+    <resultMap id="TicketResultMap" type="com.ticket.core.domain.entity.Ticket">
+        <id column="id" property="id"/>
+        <result column="order_id" property="orderId"/>
+        <result column="user_id" property="userId"/>
+        <result column="qr_code" property="qrCode"/>
+        <result column="ticket_no" property="ticketNo"/>
+        <result column="status" property="status"/>
+        <result column="verify_time" property="verifyTime"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 插入票券 -->
+    <insert id="insert" parameterType="com.ticket.core.domain.entity.Ticket">
+        INSERT INTO ticket (order_id, user_id, qr_code, ticket_no, status, verify_time, create_time, update_time)
+        VALUES (#{orderId}, #{userId}, #{qrCode}, #{ticketNo}, #{status}, #{verifyTime}, #{createTime}, #{updateTime})
+    </insert>
+
+    <!-- 批量插入票券 -->
+    <insert id="batchInsert">
+        INSERT INTO ticket (order_id, user_id, qr_code, ticket_no, status, verify_time, create_time, update_time)
+        VALUES
+        <foreach collection="tickets" item="ticket" separator=",">
+            (#{ticket.orderId}, #{ticket.userId}, #{ticket.qrCode}, #{ticket.ticketNo}, #{ticket.status}, #{ticket.verifyTime}, #{ticket.createTime}, #{ticket.updateTime})
+        </foreach>
+    </insert>
+
+    <!-- 根据二维码查询票券 -->
+    <select id="selectByQrCode" resultMap="TicketResultMap">
+        SELECT id, order_id, user_id, qr_code, ticket_no, status, verify_time, create_time, update_time
+        FROM ticket
+        WHERE qr_code = #{qrCode}
+    </select>
+
+    <!-- 根据票券编号查询票券 -->
+    <select id="selectByTicketNo" resultMap="TicketResultMap">
+        SELECT id, order_id, user_id, qr_code, ticket_no, status, verify_time, create_time, update_time
+        FROM ticket
+        WHERE ticket_no = #{ticketNo}
+    </select>
+
+    <!-- 根据 ID 查询票券 -->
+    <select id="selectById" resultMap="TicketResultMap">
+        SELECT id, order_id, user_id, qr_code, ticket_no, status, verify_time, create_time, update_time
+        FROM ticket
+        WHERE id = #{id}
+    </select>
+
+    <!-- 根据订单 ID 查询票券列表 -->
+    <select id="selectByOrderId" resultMap="TicketResultMap">
+        SELECT id, order_id, user_id, qr_code, ticket_no, status, verify_time, create_time, update_time
+        FROM ticket
+        WHERE order_id = #{orderId}
+    </select>
+
+    <!-- 更新票券状态和核销时间 -->
+    <update id="updateStatusAndVerifyTime">
+        UPDATE ticket
+        SET status      = #{status},
+            verify_time = #{verifyTime}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

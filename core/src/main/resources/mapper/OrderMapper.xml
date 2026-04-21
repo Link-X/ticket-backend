@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.ticket.core.mapper.OrderMapper">
+
+    <!-- 订单结果映射 -->
+    <resultMap id="OrderResultMap" type="com.ticket.core.domain.entity.Order">
+        <id column="id" property="id"/>
+        <result column="order_no" property="orderNo"/>
+        <result column="user_id" property="userId"/>
+        <result column="session_id" property="sessionId"/>
+        <result column="total_amount" property="totalAmount"/>
+        <result column="status" property="status"/>
+        <result column="pay_time" property="payTime"/>
+        <result column="expire_time" property="expireTime"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 插入订单（自动生成主键） -->
+    <insert id="insert" parameterType="com.ticket.core.domain.entity.Order" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `order` (order_no, user_id, session_id, total_amount, status, pay_time, expire_time, create_time, update_time)
+        VALUES (#{orderNo}, #{userId}, #{sessionId}, #{totalAmount}, #{status}, #{payTime}, #{expireTime}, #{createTime}, #{updateTime})
+    </insert>
+
+    <!-- 根据 ID 查询订单 -->
+    <select id="selectById" resultMap="OrderResultMap">
+        SELECT id, order_no, user_id, session_id, total_amount, status, pay_time, expire_time, create_time, update_time
+        FROM `order`
+        WHERE id = #{id}
+    </select>
+
+    <!-- 根据订单号查询订单 -->
+    <select id="selectByOrderNo" resultMap="OrderResultMap">
+        SELECT id, order_no, user_id, session_id, total_amount, status, pay_time, expire_time, create_time, update_time
+        FROM `order`
+        WHERE order_no = #{orderNo}
+    </select>
+
+    <!-- 更新订单状态 -->
+    <update id="updateStatus">
+        UPDATE `order`
+        SET status = #{status}
+        WHERE id = #{id}
+    </update>
+
+    <!-- 查询已过期待支付订单（status=0 且 expire_time < expireTime） -->
+    <select id="selectExpiredOrders" resultMap="OrderResultMap">
+        SELECT id, order_no, user_id, session_id, total_amount, status, pay_time, expire_time, create_time, update_time
+        FROM `order`
+        WHERE status = #{status}
+          AND expire_time &lt; #{expireTime}
+        LIMIT #{limit}
+    </select>
+
+    <!-- 更新订单状态和支付时间 -->
+    <update id="updateStatusAndPayTime">
+        UPDATE `order`
+        SET status   = #{status},
+            pay_time = #{payTime}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

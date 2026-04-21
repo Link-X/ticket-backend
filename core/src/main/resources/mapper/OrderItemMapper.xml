@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.ticket.core.mapper.OrderItemMapper">
+
+    <!-- 订单项结果映射 -->
+    <resultMap id="OrderItemResultMap" type="com.ticket.core.domain.entity.OrderItem">
+        <id column="id" property="id"/>
+        <result column="order_id" property="orderId"/>
+        <result column="seat_id" property="seatId"/>
+        <result column="price" property="price"/>
+        <result column="seat_info" property="seatInfo"/>
+    </resultMap>
+
+    <!-- 插入订单项（自动生成主键） -->
+    <insert id="insert" parameterType="com.ticket.core.domain.entity.OrderItem" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO order_item (order_id, seat_id, price, seat_info)
+        VALUES (#{orderId}, #{seatId}, #{price}, #{seatInfo})
+    </insert>
+
+    <!-- 批量插入订单项 -->
+    <insert id="batchInsert" useGeneratedKeys="true" keyProperty="items.id">
+        INSERT INTO order_item (order_id, seat_id, price, seat_info)
+        VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{item.orderId}, #{item.seatId}, #{item.price}, #{item.seatInfo})
+        </foreach>
+    </insert>
+
+    <!-- 根据订单 ID 查询订单项列表 -->
+    <select id="selectByOrderId" resultMap="OrderItemResultMap">
+        SELECT id, order_id, seat_id, price, seat_info
+        FROM order_item
+        WHERE order_id = #{orderId}
+    </select>
+
+    <!-- 统计有效订单中指定座位的数量（只统计待支付=0和已支付=1的订单，排除已取消=2和已过期=4） -->
+    <select id="countBySeatIdAndValidOrder" resultType="int">
+        SELECT COUNT(*)
+        FROM order_item oi
+                 JOIN `order` o ON oi.order_id = o.id
+        WHERE oi.seat_id = #{seatId}
+          AND o.status IN (0, 1)
+    </select>
+
+</mapper>

@@ -15,4 +15,7 @@ public class Ticket {
     private String ticketNo;
     private Integer status;
     private LocalDateTime verifyTime;
+    // 审计字段
+    private LocalDateTime createTime;
+    private LocalDateTime updateTime;
 }

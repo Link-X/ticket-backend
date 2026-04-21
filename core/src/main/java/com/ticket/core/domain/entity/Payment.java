@@ -17,4 +17,7 @@ public class Payment {
     private Integer status;
     private String tradeNo;
     private LocalDateTime callbackTime;
+    // 审计字段
+    private LocalDateTime createTime;
+    private LocalDateTime updateTime;
 }

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.ticket.core.mapper.ShowMapper">
+
+    <!-- 演出结果映射 -->
+    <resultMap id="ShowResultMap" type="com.ticket.core.domain.entity.Show">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="description" property="description"/>
+        <result column="category" property="category"/>
+        <result column="poster_url" property="posterUrl"/>
+        <result column="venue" property="venue"/>
+        <result column="status" property="status"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 插入演出（自动生成主键） -->
+    <insert id="insert" parameterType="com.ticket.core.domain.entity.Show" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `show` (name, description, category, poster_url, venue, status, create_time, update_time)
+        VALUES (#{name}, #{description}, #{category}, #{posterUrl}, #{venue}, #{status}, #{createTime}, #{updateTime})
+    </insert>
+
+    <!-- 更新演出信息 -->
+    <update id="update" parameterType="com.ticket.core.domain.entity.Show">
+        UPDATE `show`
+        SET name        = #{name},
+            description = #{description},
+            category    = #{category},
+            poster_url  = #{posterUrl},
+            venue       = #{venue},
+            status      = #{status},
+            update_time = #{updateTime}
+        WHERE id = #{id}
+    </update>
+
+    <!-- 根据 ID 查询演出 -->
+    <select id="selectById" resultMap="ShowResultMap">
+        SELECT id, name, description, category, poster_url, venue, status, create_time, update_time
+        FROM `show`
+        WHERE id = #{id}
+    </select>
+
+    <!-- 查询所有演出 -->
+    <select id="selectAll" resultMap="ShowResultMap">
+        SELECT id, name, description, category, poster_url, venue, status, create_time, update_time
+        FROM `show`
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 根据状态查询演出列表 -->
+    <select id="selectByStatus" resultMap="ShowResultMap">
+        SELECT id, name, description, category, poster_url, venue, status, create_time, update_time
+        FROM `show`
+        WHERE status = #{status}
+        ORDER BY create_time DESC
+    </select>
+
+</mapper>

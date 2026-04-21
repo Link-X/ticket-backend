@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.ticket.core.mapper.ShowSessionMapper">
+
+    <!-- 演出场次结果映射 -->
+    <resultMap id="ShowSessionResultMap" type="com.ticket.core.domain.entity.ShowSession">
+        <id column="id" property="id"/>
+        <result column="show_id" property="showId"/>
+        <result column="name" property="name"/>
+        <result column="start_time" property="startTime"/>
+        <result column="end_time" property="endTime"/>
+        <result column="total_seats" property="totalSeats"/>
+        <result column="limit_per_user" property="limitPerUser"/>
+        <result column="status" property="status"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 插入场次（自动生成主键） -->
+    <insert id="insert" parameterType="com.ticket.core.domain.entity.ShowSession" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO show_session (show_id, name, start_time, end_time, total_seats, limit_per_user, status, create_time, update_time)
+        VALUES (#{showId}, #{name}, #{startTime}, #{endTime}, #{totalSeats}, #{limitPerUser}, #{status}, #{createTime}, #{updateTime})
+    </insert>
+
+    <!-- 更新场次信息 -->
+    <update id="update" parameterType="com.ticket.core.domain.entity.ShowSession">
+        UPDATE show_session
+        SET show_id        = #{showId},
+            name           = #{name},
+            start_time     = #{startTime},
+            end_time       = #{endTime},
+            total_seats    = #{totalSeats},
+            limit_per_user = #{limitPerUser},
+            status         = #{status},
+            update_time    = #{updateTime}
+        WHERE id = #{id}
+    </update>
+
+    <!-- 根据 ID 查询场次 -->
+    <select id="selectById" resultMap="ShowSessionResultMap">
+        SELECT id, show_id, name, start_time, end_time, total_seats, limit_per_user, status, create_time, update_time
+        FROM show_session
+        WHERE id = #{id}
+    </select>
+
+    <!-- 根据演出 ID 查询场次列表 -->
+    <select id="selectByShowId" resultMap="ShowSessionResultMap">
+        SELECT id, show_id, name, start_time, end_time, total_seats, limit_per_user, status, create_time, update_time
+        FROM show_session
+        WHERE show_id = #{showId}
+        ORDER BY start_time ASC
+    </select>
+
+</mapper>
