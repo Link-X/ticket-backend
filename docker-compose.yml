@@ -21,5 +21,16 @@ services:
       - --default-time-zone=+8:00
     restart: unless-stopped
 
+  redis:
+     image: redis:7-alpine
+     container_name: ticket-redis
+     ports:
+       - "6379:6379"
+     volumes:
+       - redis-data:/data
+     command: redis-server --appendonly yes
+
+
 volumes:
   mysql-data:
+  redis-data:
