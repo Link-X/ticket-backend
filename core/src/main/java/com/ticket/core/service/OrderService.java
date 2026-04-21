@@ -54,7 +54,7 @@ public class OrderService {
         for (Long seatId : seatIds) {
             int count = orderItemMapper.countBySeatIdAndValidOrder(seatId);
             if (count > 0) {
-                // 释放所有座位的 Redis 锁
+                //释放当前创建订单选择位置的 Redis 锁
                 for (Long id : seatIds) {
                     inventoryService.releaseSeat(sessionId, id);
                 }
