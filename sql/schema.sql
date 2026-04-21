@@ -53,7 +53,7 @@ CREATE TABLE show_session (
     end_time DATETIME NOT NULL COMMENT '结束时间',
     total_seats INT NOT NULL DEFAULT 0 COMMENT '总座位数',
     limit_per_user INT NOT NULL DEFAULT 1 COMMENT '每用户限购数量',
-    status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=未开放, 1=销售中, 2=已结束',
+    status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=未开放, 1=销售中, 2=已结束, 3=已预热',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -83,7 +83,7 @@ CREATE TABLE `order` (
     user_id BIGINT NOT NULL COMMENT '用户ID',
     session_id BIGINT NOT NULL COMMENT '场次ID',
     total_amount DECIMAL(10,2) NOT NULL COMMENT '订单总金额',
-    status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=待支付, 1=已支付, 2=已取消, 3=已过期',
+    status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=待支付, 1=已支付, 2=已取消, 3=已退款, 4=已过期',
     pay_time DATETIME DEFAULT NULL COMMENT '支付时间',
     expire_time DATETIME NOT NULL COMMENT '过期时间(下单后5分钟)',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -91,6 +91,8 @@ CREATE TABLE `order` (
     PRIMARY KEY (id),
     UNIQUE KEY uk_order_no (order_no),
     KEY idx_user_id (user_id),
+    KEY idx_user_status (user_id, status) COMMENT '用于用户订单列表查询',
+    KEY idx_session_id (session_id) COMMENT '用于按场次查询订单',
     KEY idx_status_expire (status, expire_time) COMMENT '用于超时订单扫描'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单表';
 
@@ -103,7 +105,8 @@ CREATE TABLE order_item (
     seat_info VARCHAR(128) DEFAULT NULL COMMENT '座位信息(如"A排5座")',
     PRIMARY KEY (id),
     KEY idx_order_id (order_id),
-    KEY idx_seat_id (seat_id)
+    KEY idx_seat_id (seat_id),
+    KEY idx_order_seat (order_id, seat_id) COMMENT '用于订单明细关联查询'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单明细表';
 
 -- 8. 支付表
@@ -120,7 +123,8 @@ CREATE TABLE payment (
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uk_payment_no (payment_no),
-    KEY idx_order_id (order_id)
+    KEY idx_order_id (order_id),
+    KEY idx_order_status (order_id, status) COMMENT '用于按订单查询支付状态'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付表';
 
 -- 9. 票据表
