@@ -1,0 +1,147 @@
+# 抢票系统 端到端验证脚本
+# 工具: IntelliJ HTTP Client / VS Code REST Client
+#
+# 执行顺序: 按步骤 1→11 依次运行
+# 前置条件:
+#   - docker-compose up -d (MySQL:3306 + Redis:6379)
+#   - admin  服务启动: 端口 8081
+#   - user   服务启动: 端口 8082
+#
+# 说明: token / sessionId / orderId / qrCode 需从上一步响应中
+#       复制到下方对应变量后再执行后续请求
+
+@adminHost = http://localhost:8081
+@userHost  = http://localhost:8082
+
+# 登录后将 token 填到这里
+@token = <登录后替换>
+
+# 后续步骤自动依赖的 ID（从响应中取，手动填入）
+@showId    = 1
+@sessionId = 1
+@orderId   = 1
+@qrCode    = <支付后从 tickets[0].qrCode 取>
+
+###
+# Step 1: 注册用户
+# 预期: {"code":200,"data":{"token":"...","userId":...}}
+POST {{userHost}}/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "testuser",
+  "password": "test123456",
+  "phone": "13800000001",
+  "email": "test@ticket.com"
+}
+
+###
+# Step 2: 用户登录 → 复制 data.token 到顶部 @token 变量
+# 预期: {"code":200,"data":{"token":"...","userId":...}}
+POST {{userHost}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "testuser",
+  "password": "test123456"
+}
+
+###
+# Step 3: 创建演出 (Admin) → 复制 data.id 到 @showId
+# 预期: {"code":200,"data":{"id":1,"name":"五月天演唱会",...}}
+POST {{adminHost}}/api/admin/show/create
+Content-Type: application/json
+
+{
+  "name": "五月天演唱会",
+  "description": "2026 年巡回演唱会",
+  "category": "演唱会",
+  "venue": "国家体育场",
+  "posterUrl": "https://example.com/poster.jpg"
+}
+
+###
+# Step 4: 创建场次 (Admin) → 复制 data.id 到 @sessionId
+# 预期: {"code":200,"data":{"id":1,"showId":1,...}}
+POST {{adminHost}}/api/admin/session/create
+Content-Type: application/json
+
+{
+  "showId": {{showId}},
+  "name": "北京场 2026-06-01",
+  "startTime": "2026-06-01T19:00:00",
+  "endTime": "2026-06-01T22:00:00",
+  "totalSeats": 6,
+  "limitPerUser": 2
+}
+
+###
+# Step 5: 批量创建座位 (Admin)
+# 预期: {"code":200,"data":[{"id":1,...},{"id":2,...},...]}
+POST {{adminHost}}/api/admin/seat/batch
+Content-Type: application/json
+
+{
+  "sessionId": {{sessionId}},
+  "seats": [
+    {"rowNo": 1, "colNo": 1, "seatType": "STANDARD", "price": 680.00},
+    {"rowNo": 1, "colNo": 2, "seatType": "STANDARD", "price": 680.00},
+    {"rowNo": 1, "colNo": 3, "seatType": "STANDARD", "price": 680.00},
+    {"rowNo": 2, "colNo": 1, "seatType": "VIP",      "price": 1280.00},
+    {"rowNo": 2, "colNo": 2, "seatType": "VIP",      "price": 1280.00},
+    {"rowNo": 2, "colNo": 3, "seatType": "VIP",      "price": 1280.00}
+  ]
+}
+
+###
+# Step 6: 预热座位库存到 Redis，场次状态变为开售 (Admin)
+# 预期: {"code":200,"data":"预热完成，共 6 个座位"}
+POST {{adminHost}}/api/admin/seat/warmup/{{sessionId}}
+
+###
+# Step 7: 用户端查看上架演出列表
+# 预期: {"code":200,"data":[{"id":1,"name":"五月天演唱会",...}]}
+GET {{userHost}}/api/show/list
+
+###
+# Step 8: 查看场次可售座位（Redis 中取）
+# 预期: {"code":200,"data":{"count":6,"seatIds":[...]}}
+GET {{userHost}}/api/show/session/{{sessionId}}/seats
+
+###
+# Step 9: 提交购票请求（写入 Redis Stream，异步创建订单）
+# 需要 Authorization header
+# 预期: {"code":200,"data":{"requestId":"1234-xxx","status":"QUEUED"}}
+# 注: TicketOrderConsumer 消费后订单落库，之后可通过 /api/admin/order/query?orderNo=xxx 查询
+#     复制 orderId (从 admin 查询结果取) 到 @orderId
+POST {{userHost}}/api/order/submit
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "sessionId": {{sessionId}},
+  "seatIds": [1, 2]
+}
+
+###
+# Step 9.1: (等消费者处理后) Admin 查询订单确认落库 → 复制 data.id 到 @orderId
+# 预期: {"code":200,"data":{"id":1,"orderNo":"...","status":0,...}}
+GET {{adminHost}}/api/admin/order/query?orderNo=<从消费者日志取 orderNo>
+
+###
+# Step 10: 支付订单（Mock 网关，直接成功）
+# 预期: {"code":200,"data":{"status":"PAID","paymentNo":"...","tickets":[...]}}
+#        复制 data.tickets[0].qrCode 到 @qrCode
+POST {{userHost}}/api/payment/create
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "orderId": {{orderId}},
+  "channel": "mock"
+}
+
+###
+# Step 11: 入场核验（扫码核销）
+# 预期: {"code":200,"data":{"id":...,"status":1,"verifyTime":"..."}}
+GET {{userHost}}/api/verify/qr/{{qrCode}}
