@@ -38,6 +38,12 @@ public class SeatInventoryService {
      */
     private static final DefaultRedisScript<Long> RELEASE_SEAT_SCRIPT;
 
+    /**
+     * 原子消费座位 Lua脚本:
+     * 验证锁的持有者后，原子执行：从可售集合移除 + 删除锁
+     */
+    private static final DefaultRedisScript<Long> CONSUME_SEAT_SCRIPT;
+
     static {
         BATCH_LOCK_SCRIPT = new DefaultRedisScript<>();
         BATCH_LOCK_SCRIPT.setResultType(Long.class);
@@ -68,6 +74,31 @@ public class SeatInventoryService {
             "redis.call('DEL', KEYS[1])\n" +
             "redis.call('SADD', KEYS[2], ARGV[1])\n" +
             "return 1"
+        );
+
+        CONSUME_SEAT_SCRIPT = new DefaultRedisScript<>();
+        CONSUME_SEAT_SCRIPT.setResultType(Long.class);
+        CONSUME_SEAT_SCRIPT.setScriptText(
+                "local sessionKey = KEYS[1]\n" +
+                        "local lockKey = KEYS[2]\n" +
+                        "local seatId = ARGV[1]\n" +
+                        "local userId = ARGV[2]\n" +
+                        "\n" +
+                        "-- 检查锁是否存在且属于当前用户\n" +
+                        "local lockOwner = redis.call('GET', lockKey)\n" +
+                        "if not lockOwner then\n" +
+                        "    -- 锁不存在，可能已被释放，返回 0\n" +
+                        "    return 0\n" +
+                        "end\n" +
+                        "if lockOwner ~= userId then\n" +
+                        "    -- 锁不属于当前用户，返回 0\n" +
+                        "    return 0\n" +
+                        "end\n" +
+                        "\n" +
+                        "-- 原子执行：从可售集合移除 + 删除锁\n" +
+                        "redis.call('SREM', sessionKey, seatId)\n" +
+                        "redis.call('DEL', lockKey)\n" +
+                        "return 1\n"
         );
     }
 
@@ -200,19 +231,28 @@ public class SeatInventoryService {
     }
 
     /**
-     * 消费座位（支付成功后调用）：从可售集合移除 + 删除锁 key
+     * 消费座位（支付成功后调用）
+     * 原子操作：验证锁归属 + 从可售集合移除 + 删除锁
      *
      * @param sessionId 场次 ID
      * @param seatId    座位 ID
+     * @param userId    用户 ID（必须是锁的持有者）
+     * @return 消费成功返回 true，失败返回 false
      */
-    public void consumeSeat(long sessionId, long seatId) {
+    public boolean consumeSeat(long sessionId, long seatId, String userId) {
         String sessionKey = RedisKeys.sessionSeats(sessionId);
         String lockKey = RedisKeys.seatLock(sessionId, seatId);
 
-        // 从可售集合中移除
-        redisTemplate.opsForSet().remove(sessionKey, String.valueOf(seatId));
-        // 删除锁 key
-        redisTemplate.delete(lockKey);
+        Long result = redisTemplate.execute(
+                CONSUME_SEAT_SCRIPT,
+                Arrays.asList(sessionKey, lockKey),
+                String.valueOf(seatId), userId
+        );
+        if (Long.valueOf(1L).equals(result)) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     /**
