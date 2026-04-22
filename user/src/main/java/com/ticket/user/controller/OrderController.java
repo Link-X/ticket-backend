@@ -7,6 +7,7 @@ import com.ticket.common.exception.ErrorCode;
 import com.ticket.common.result.Result;
 import com.ticket.core.domain.dto.OrderCreateRequest;
 import com.ticket.core.service.PurchaseLimitService;
+import com.ticket.core.service.SeatInventoryService;
 import com.ticket.core.service.ShowService;
 import lombok.Data;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,18 +26,24 @@ public class OrderController {
 
     private final ShowService showService;
     private final PurchaseLimitService purchaseLimitService;
+    private final SeatInventoryService inventoryService;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+
+    /** 座位锁 TTL（秒）：覆盖队列等待 + 订单处理时间 */
+    private static final long SEAT_LOCK_TTL = 300L;
 
     @Value("${ticket.stream.key:ticket:order:stream}")
     private String streamKey;
 
     public OrderController(ShowService showService,
                            PurchaseLimitService purchaseLimitService,
+                           SeatInventoryService inventoryService,
                            StringRedisTemplate redisTemplate,
                            ObjectMapper objectMapper) {
         this.showService = showService;
         this.purchaseLimitService = purchaseLimitService;
+        this.inventoryService = inventoryService;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
     }
@@ -54,6 +61,14 @@ public class OrderController {
                 req.getSessionId(), userId, session.getLimitPerUser());
         if (!allowed) {
             throw new BusinessException(ErrorCode.EXCEED_PURCHASE_LIMIT);
+        }
+
+        // 原子锁座：任一座位已被锁定则整批失败
+        boolean locked = inventoryService.batchLockSeats(
+                req.getSessionId(), req.getSeatIds(), String.valueOf(userId), SEAT_LOCK_TTL);
+        if (!locked) {
+            purchaseLimitService.decrement(req.getSessionId(), userId);
+            throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
         }
 
         // 构建消息并写入 Redis Stream

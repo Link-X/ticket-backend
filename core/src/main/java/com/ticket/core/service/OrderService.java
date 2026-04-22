@@ -135,6 +135,11 @@ public class OrderService {
         }
         orderItemMapper.batchInsert(items);
 
+        // 6. 消费座位：从可售集合移除 + 删除锁（与 submit 时的 batchLockSeats 对应）
+        for (Long seatId : seatIds) {
+            inventoryService.consumeSeat(sessionId, seatId, String.valueOf(userId));
+        }
+
         return order;
     }
 
