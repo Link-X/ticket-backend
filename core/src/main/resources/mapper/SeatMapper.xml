@@ -4,52 +4,56 @@
 
 <mapper namespace="com.ticket.core.mapper.SeatMapper">
 
-    <!-- 座位结果映射 -->
     <resultMap id="SeatResultMap" type="com.ticket.core.domain.entity.Seat">
-        <id column="id" property="id"/>
-        <result column="session_id" property="sessionId"/>
-        <result column="row_no" property="rowNo"/>
-        <result column="col_no" property="colNo"/>
-        <result column="seat_type" property="seatType"/>
-        <result column="price" property="price"/>
-        <result column="status" property="status"/>
-        <result column="create_time" property="createTime"/>
+        <id     column="id"           property="id"/>
+        <result column="session_id"   property="sessionId"/>
+        <result column="row_no"       property="rowNo"/>
+        <result column="col_no"       property="colNo"/>
+        <result column="type"         property="type"/>
+        <result column="area_id"      property="areaId"/>
+        <result column="seat_name"    property="seatName"/>
+        <result column="pair_seat_id" property="pairSeatId"/>
+        <result column="status"       property="status"/>
+        <result column="create_time"  property="createTime"/>
     </resultMap>
 
-    <!-- 插入座位（自动生成主键） -->
     <insert id="insert" parameterType="com.ticket.core.domain.entity.Seat" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO seat (session_id, row_no, col_no, seat_type, price, status, create_time)
-        VALUES (#{sessionId}, #{rowNo}, #{colNo}, #{seatType}, #{price}, #{status}, #{createTime})
+        INSERT INTO seat (session_id, row_no, col_no, type, area_id, seat_name, pair_seat_id, status, create_time)
+        VALUES (#{sessionId}, #{rowNo}, #{colNo}, #{type}, #{areaId}, #{seatName}, #{pairSeatId}, #{status}, #{createTime})
     </insert>
 
-    <!-- 批量插入座位 -->
     <insert id="batchInsert" useGeneratedKeys="true" keyProperty="seats.id">
-        INSERT INTO seat (session_id, row_no, col_no, seat_type, price, status, create_time)
+        INSERT INTO seat (session_id, row_no, col_no, type, area_id, seat_name, pair_seat_id, status, create_time)
         VALUES
         <foreach collection="seats" item="seat" separator=",">
-            (#{seat.sessionId}, #{seat.rowNo}, #{seat.colNo}, #{seat.seatType}, #{seat.price}, #{seat.status}, #{seat.createTime})
+            (#{seat.sessionId}, #{seat.rowNo}, #{seat.colNo}, #{seat.type}, #{seat.areaId},
+             #{seat.seatName}, #{seat.pairSeatId}, #{seat.status}, #{seat.createTime})
         </foreach>
     </insert>
 
-    <!-- 根据 ID 查询座位 -->
     <select id="selectById" resultMap="SeatResultMap">
-        SELECT id, session_id, row_no, col_no, seat_type, price, status, create_time
-        FROM seat
-        WHERE id = #{id}
+        SELECT id, session_id, row_no, col_no, type, area_id, seat_name, pair_seat_id, status, create_time
+        FROM seat WHERE id = #{id}
     </select>
 
-    <!-- 根据场次 ID 查询座位列表 -->
     <select id="selectBySessionId" resultMap="SeatResultMap">
-        SELECT id, session_id, row_no, col_no, seat_type, price, status, create_time
+        SELECT id, session_id, row_no, col_no, type, area_id, seat_name, pair_seat_id, status, create_time
         FROM seat
         WHERE session_id = #{sessionId}
         ORDER BY row_no ASC, col_no ASC
     </select>
 
-    <!-- 批量更新座位状态 -->
+    <select id="selectByIds" resultMap="SeatResultMap">
+        SELECT id, session_id, row_no, col_no, type, area_id, seat_name, pair_seat_id, status, create_time
+        FROM seat
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
     <update id="batchUpdateStatus">
-        UPDATE seat
-        SET status = #{status}
+        UPDATE seat SET status = #{status}
         WHERE id IN
         <foreach collection="ids" item="id" open="(" separator="," close=")">
             #{id}

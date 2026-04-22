@@ -4,27 +4,27 @@
 
 <mapper namespace="com.ticket.core.mapper.ShowSessionMapper">
 
-    <!-- 演出场次结果映射 -->
     <resultMap id="ShowSessionResultMap" type="com.ticket.core.domain.entity.ShowSession">
-        <id column="id" property="id"/>
-        <result column="show_id" property="showId"/>
-        <result column="name" property="name"/>
-        <result column="start_time" property="startTime"/>
-        <result column="end_time" property="endTime"/>
-        <result column="total_seats" property="totalSeats"/>
+        <id     column="id"            property="id"/>
+        <result column="show_id"       property="showId"/>
+        <result column="name"          property="name"/>
+        <result column="start_time"    property="startTime"/>
+        <result column="end_time"      property="endTime"/>
+        <result column="total_seats"   property="totalSeats"/>
         <result column="limit_per_user" property="limitPerUser"/>
-        <result column="status" property="status"/>
-        <result column="create_time" property="createTime"/>
-        <result column="update_time" property="updateTime"/>
+        <result column="status"        property="status"/>
+        <result column="row_count"     property="rowCount"/>
+        <result column="col_count"     property="colCount"/>
+        <result column="create_time"   property="createTime"/>
+        <result column="update_time"   property="updateTime"/>
     </resultMap>
 
-    <!-- 插入场次（自动生成主键） -->
     <insert id="insert" parameterType="com.ticket.core.domain.entity.ShowSession" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO show_session (show_id, name, start_time, end_time, total_seats, limit_per_user, status, create_time, update_time)
-        VALUES (#{showId}, #{name}, #{startTime}, #{endTime}, #{totalSeats}, #{limitPerUser}, #{status}, #{createTime}, #{updateTime})
+        INSERT INTO show_session (show_id, name, start_time, end_time, total_seats, limit_per_user, status, row_count, col_count, create_time, update_time)
+        VALUES (#{showId}, #{name}, #{startTime}, #{endTime}, #{totalSeats}, #{limitPerUser}, #{status},
+                #{rowCount}, #{colCount}, #{createTime}, #{updateTime})
     </insert>
 
-    <!-- 更新场次信息 -->
     <update id="update" parameterType="com.ticket.core.domain.entity.ShowSession">
         UPDATE show_session
         SET show_id        = #{showId},
@@ -34,22 +34,22 @@
             total_seats    = #{totalSeats},
             limit_per_user = #{limitPerUser},
             status         = #{status},
+            row_count      = #{rowCount},
+            col_count      = #{colCount},
             update_time    = #{updateTime}
         WHERE id = #{id}
     </update>
 
-    <!-- 根据 ID 查询场次 -->
     <select id="selectById" resultMap="ShowSessionResultMap">
-        SELECT id, show_id, name, start_time, end_time, total_seats, limit_per_user, status, create_time, update_time
-        FROM show_session
-        WHERE id = #{id}
+        SELECT id, show_id, name, start_time, end_time, total_seats, limit_per_user, status,
+               row_count, col_count, create_time, update_time
+        FROM show_session WHERE id = #{id}
     </select>
 
-    <!-- 根据演出 ID 查询场次列表 -->
     <select id="selectByShowId" resultMap="ShowSessionResultMap">
-        SELECT id, show_id, name, start_time, end_time, total_seats, limit_per_user, status, create_time, update_time
-        FROM show_session
-        WHERE show_id = #{showId}
+        SELECT id, show_id, name, start_time, end_time, total_seats, limit_per_user, status,
+               row_count, col_count, create_time, update_time
+        FROM show_session WHERE show_id = #{showId}
         ORDER BY start_time ASC
     </select>
 

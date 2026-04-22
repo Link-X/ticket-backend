@@ -2,14 +2,16 @@ package com.ticket.admin.controller;
 
 import com.ticket.common.result.Result;
 import com.ticket.core.domain.entity.Seat;
+import com.ticket.core.domain.entity.SeatArea;
 import com.ticket.core.domain.entity.ShowSession;
 import com.ticket.core.mapper.SeatMapper;
+import com.ticket.core.service.SeatAreaService;
 import com.ticket.core.service.SeatInventoryService;
 import com.ticket.core.service.ShowService;
 import lombok.Data;
 import org.springframework.web.bind.annotation.*;
 
-import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
@@ -19,22 +21,31 @@ public class SeatController {
     private final SeatMapper seatMapper;
     private final SeatInventoryService inventoryService;
     private final ShowService showService;
+    private final SeatAreaService seatAreaService;
 
     public SeatController(SeatMapper seatMapper,
                           SeatInventoryService inventoryService,
-                          ShowService showService) {
+                          ShowService showService,
+                          SeatAreaService seatAreaService) {
         this.seatMapper = seatMapper;
         this.inventoryService = inventoryService;
         this.showService = showService;
+        this.seatAreaService = seatAreaService;
     }
 
     /**
      * 批量创建座位
+     * seats 中每个元素需提供: rowNo, colNo, type, areaId, seatName, pairSeatId(情侣座才填)
      */
     @PostMapping("/batch")
     public Result<?> batchCreateSeats(@RequestBody BatchCreateRequest req) {
         List<Seat> seats = req.getSeats();
-        seats.forEach(s -> s.setSessionId(req.getSessionId()));
+        LocalDateTime now = LocalDateTime.now();
+        seats.forEach(s -> {
+            s.setSessionId(req.getSessionId());
+            s.setStatus(0);
+            s.setCreateTime(now);
+        });
         seatMapper.batchInsert(seats);
         return Result.success(seats);
     }
@@ -48,7 +59,26 @@ public class SeatController {
     }
 
     /**
-     * 预热指定场次座位库存到 Redis，并将场次状态置为开售(status=1)
+     * 保存/覆盖场次价格区域
+     */
+    @PostMapping("/area/save")
+    public Result<?> saveAreas(@RequestBody SaveAreasRequest req) {
+        List<SeatArea> areas = req.getAreas();
+        areas.forEach(a -> a.setSessionId(req.getSessionId()));
+        seatAreaService.saveAreas(req.getSessionId(), areas);
+        return Result.success("价格区域保存成功");
+    }
+
+    /**
+     * 查询场次价格区域列表
+     */
+    @GetMapping("/area/list")
+    public Result<?> listAreas(@RequestParam Long sessionId) {
+        return Result.success(seatAreaService.getAreasBySession(sessionId));
+    }
+
+    /**
+     * 预热：将座位库存和区域价格写入 Redis，并将场次状态置为开售(status=1)
      */
     @PostMapping("/warmup/{sessionId}")
     public Result<?> warmupSeats(@PathVariable Long sessionId) {
@@ -56,19 +86,29 @@ public class SeatController {
         if (seats == null || seats.isEmpty()) {
             return Result.fail(400, "该场次暂无座位数据");
         }
-        inventoryService.warmup(sessionId, seats);
+        List<SeatArea> areas = seatAreaService.getAreasBySession(sessionId);
+        if (areas == null || areas.isEmpty()) {
+            return Result.fail(400, "该场次暂无价格区域数据，请先调用 /area/save");
+        }
+        inventoryService.warmup(sessionId, seats, areas);
 
         ShowSession session = showService.getSession(sessionId);
         if (session != null) {
             session.setStatus(1);
             showService.updateSession(session);
         }
-        return Result.success("预热完成，共 " + seats.size() + " 个座位");
+        return Result.success("预热完成，共 " + seats.size() + " 个座位，" + areas.size() + " 个价格区域");
     }
 
     @Data
     public static class BatchCreateRequest {
         private Long sessionId;
         private List<Seat> seats;
+    }
+
+    @Data
+    public static class SaveAreasRequest {
+        private Long sessionId;
+        private List<SeatArea> areas;
     }
 }
