@@ -1,4 +1,4 @@
-# 抢票系统后端
+# Ticket Booking System — Backend
 
 ![Java](https://img.shields.io/badge/Java-11-blue)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.x-brightgreen)
@@ -6,51 +6,53 @@
 ![Redis](https://img.shields.io/badge/Redis-7.x-red)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-面向千~万级并发场景的抢票系统后端，支持演出管理、选座购票、Redis 库存管理、订单超时取消、Mock 支付与入场核验。采用 Maven 多模块架构，各模块独立部署。
+[中文文档](README.zh.md)
+
+A high-concurrency ticket booking backend supporting thousands to tens of thousands of concurrent users. Features show management, seat selection, Redis-based inventory, order timeout cancellation, mock payment, and venue check-in verification. Built with a Maven multi-module architecture for independent deployment.
 
 ---
 
-## 功能特性
+## Features
 
-- **演出管理**：演出/场次/座位的 CRUD，管理端预热座位库存到 Redis
-- **抢票核心**：Lua 脚本原子限购检查 + Redis Stream 削峰 + 异步消费者创建订单
-- **防超卖**：Redis Set 原子扣库存，DB 层兜底校验
-- **订单超时**：5 分钟未支付自动取消，定时任务 30s 扫描兜底
-- **支付**：可扩展网关接口，内置 Mock 实现，支付成功后生成票券
-- **入场核验**：支持二维码 / 票号双通道核销
-- **JWT 认证**：`@NoLogin` 注解标记免登录接口，其余默认鉴权
+- **Show Management** — CRUD for shows / sessions / seats; admin warms up seat inventory into Redis
+- **Ticket Booking Core** — Lua atomic purchase-limit check + Redis Stream queue buffering + async order consumer
+- **Oversell Prevention** — Redis Set atomic deduction + DB-level safety check
+- **Order Timeout** — Auto-cancel after 5 minutes; scheduled job scans every 30s as a fallback
+- **Payment** — Extensible `PaymentGateway` interface with built-in Mock implementation; generates tickets on success
+- **Check-in Verification** — Dual-channel: QR code or ticket number
+- **JWT Auth** — `@NoLogin` annotation marks public endpoints; all others require authentication by default
 
 ---
 
-## 技术栈
+## Tech Stack
 
-| 层次 | 技术 | 版本 |
-|------|------|------|
-| 后端框架 | Spring Boot | 2.7.x / JDK 11 |
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| Framework | Spring Boot | 2.7.x / JDK 11 |
 | ORM | MyBatis | 3.5.x |
-| 缓存 / 分布式锁 | Redis + Redisson | 7.x / 3.x |
-| 消息队列 | Redis Stream | — |
-| 数据库 | MySQL | 8.x |
-| 鉴权 | Spring Security + JJWT | 0.12.x |
-| 构建 | Maven | — |
+| Cache / Lock | Redis + Redisson | 7.x / 3.x |
+| Message Queue | Redis Stream | — |
+| Database | MySQL | 8.x |
+| Auth | Spring Security + JJWT | 0.12.x |
+| Build | Maven | — |
 
 ---
 
-## 模块结构
+## Module Structure
 
 ```
 maill-backend/
-├── common/      # 通用工具：响应封装、异常处理、雪花ID、RedisKeys
-├── core/        # 核心业务：实体、Mapper、Service、消费者
-├── admin/       # 管理端 REST API（端口 8081）
-├── user/        # 用户端 REST API（端口 8082）
-├── payment/     # 支付模块（端口 8083）
+├── common/      # Utilities: response wrapper, exceptions, Snowflake ID, RedisKeys
+├── core/        # Core business: entities, Mappers, Services, consumer
+├── admin/       # Admin REST API  (port 8081)
+├── user/        # User  REST API  (port 8082)
+├── payment/     # Payment module  (port 8083)
 ├── sql/
 │   └── schema.sql
 └── docker-compose.yml
 ```
 
-依赖关系：
+Dependency chain:
 
 ```
 common ← core ← admin
@@ -60,116 +62,116 @@ common ← core ← admin
 
 ---
 
-## 快速启动
+## Quick Start
 
-### 前置要求
+### Prerequisites
 
 - JDK 11+
 - Maven 3.8+
 - Docker & Docker Compose
 
-### 1. 启动基础服务
+### 1. Start infrastructure
 
 ```bash
 docker-compose up -d
 ```
 
-启动 MySQL 8（3306）和 Redis 7（6379），并自动执行 `sql/schema.sql` 建表。
+Starts MySQL 8 (port 3306) and Redis 7 (port 6379). `sql/schema.sql` is executed automatically on first run.
 
-### 2. 编译
+### 2. Build
 
 ```bash
 mvn compile -q
 ```
 
-### 3. 启动各模块
+### 3. Run modules
 
 ```bash
-# 管理端（8081）
+# Admin service (8081)
 mvn spring-boot:run -pl admin
 
-# 用户端（8082）
+# User service (8082)
 mvn spring-boot:run -pl user
 
-# 支付（8083）
+# Payment service (8083)
 mvn spring-boot:run -pl payment
 ```
 
-默认使用 `dev` profile，数据库密码为 `root123`，可在各模块 `application-dev.yml` 中修改。
+The default profile is `dev`. Database password is `root123`. Edit each module's `application-dev.yml` to change.
 
 ---
 
-## API 概览
+## API Overview
 
-### 用户端（:8082）
+### User Service (:8082)
 
-| 方法 | 路径 | 说明 | 是否需要登录 |
-|------|------|------|:---:|
-| POST | `/api/auth/register` | 注册 | ✗ |
-| POST | `/api/auth/login` | 登录，返回 JWT | ✗ |
-| GET  | `/api/show/list` | 上架演出列表 | ✗ |
-| GET  | `/api/show/{id}/sessions` | 场次列表 | ✗ |
-| GET  | `/api/show/session/{id}/seats` | 可售座位（Redis） | ✗ |
-| POST | `/api/order/submit` | 提交购票，写入 Redis Stream | ✓ |
-| POST | `/api/payment/create` | 支付订单 | ✓ |
-| GET  | `/api/verify/qr/{qrCode}` | 二维码核验 | ✗ |
-| GET  | `/api/verify/ticket/{ticketNo}` | 票号核验 | ✗ |
+| Method | Path | Description | Auth |
+|--------|------|-------------|:----:|
+| POST | `/api/auth/register` | Register | ✗ |
+| POST | `/api/auth/login` | Login, returns JWT | ✗ |
+| GET  | `/api/show/list` | List published shows | ✗ |
+| GET  | `/api/show/{id}/sessions` | List sessions | ✗ |
+| GET  | `/api/show/session/{id}/seats` | Available seats (from Redis) | ✗ |
+| POST | `/api/order/submit` | Submit booking, enqueues to Redis Stream | ✓ |
+| POST | `/api/payment/create` | Pay order | ✓ |
+| GET  | `/api/verify/qr/{qrCode}` | Verify by QR code | ✗ |
+| GET  | `/api/verify/ticket/{ticketNo}` | Verify by ticket number | ✗ |
 
-### 管理端（:8081）
+### Admin Service (:8081)
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/admin/show/create` | 创建演出 |
-| POST | `/api/admin/session/create` | 创建场次 |
-| POST | `/api/admin/seat/batch` | 批量创建座位 |
-| POST | `/api/admin/seat/warmup/{sessionId}` | 预热座位库存到 Redis |
-| GET  | `/api/admin/order/{id}` | 查询订单 |
-| GET  | `/api/admin/monitor/dashboard` | 实时可售座位数 |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/admin/show/create` | Create show |
+| POST | `/api/admin/session/create` | Create session |
+| POST | `/api/admin/seat/batch` | Batch create seats |
+| POST | `/api/admin/seat/warmup/{sessionId}` | Warm up seat inventory into Redis |
+| GET  | `/api/admin/order/{id}` | Get order |
+| GET  | `/api/admin/monitor/dashboard` | Real-time available seat count |
 
-完整的端到端调用示例见 [`docs/e2e-verify.http`](docs/e2e-verify.http)（IntelliJ / VS Code REST Client 格式）。
-
----
-
-## 数据库设计
-
-共 9 张表：
-
-| 表名 | 说明 |
-|------|------|
-| `user` | 用户，BCrypt 密码 |
-| `user_role` | 用户角色（USER / ADMIN） |
-| `show` | 演出 |
-| `show_session` | 场次，含限购数 `limit_per_user` |
-| `seat` | 座位底表，仅做持久记录，实时库存由 Redis 管理 |
-| `order` | 订单，索引 `idx_status_expire` 供超时扫描 |
-| `order_item` | 订单行，含价格快照 |
-| `payment` | 支付记录 |
-| `ticket` | 票券，含 8 位友好票号（排除 O/0/I/1）和 UUID 二维码 |
-
-> **库存权威**：`session:seats:{sessionId}`（Redis Set）是唯一库存来源。`seat.status` 仅在支付成功后异步更新，用于历史追溯，不参与实时库存判断。
+For a full end-to-end walkthrough see [`docs/e2e-verify.http`](docs/e2e-verify.http) (IntelliJ / VS Code REST Client format).
 
 ---
 
-## Redis 设计
+## Database Design
 
-| Key | 类型 | 说明 | TTL |
-|-----|------|------|-----|
-| `session:seats:{sessionId}` | Set | 可售座位 ID 集合 | 7 天 |
-| `seat:info:{seatId}` | Hash | 座位详情（行/列/类型/价格） | 7 天 |
-| `seat:lock:{sessionId}:{seatId}` | String | 座位锁（value = userId） | 5 分钟 |
-| `session:purchase:{sessionId}:{userId}` | String | 用户已购数量 | 7 天 |
-| `ticket:order:stream` | Stream | 购票请求队列 | — |
+9 tables in total:
 
-关键操作均通过 **Lua 脚本**保证原子性：限购检查（INCR + 边界检查）、批量锁座（SETNX 失败全量回滚）、释放座位（DEL lock + SADD 回集合）。
+| Table | Description |
+|-------|-------------|
+| `user` | Users, BCrypt passwords |
+| `user_role` | Roles: USER / ADMIN |
+| `show` | Shows |
+| `show_session` | Sessions, includes `limit_per_user` |
+| `seat` | Seat master table — persisted record only; real-time inventory lives in Redis |
+| `order` | Orders; index `idx_status_expire` for timeout scans |
+| `order_item` | Order lines with price snapshot |
+| `payment` | Payment records |
+| `ticket` | Tickets with 8-char friendly ticket number (alphanumeric, excludes O/0/I/1) and UUID QR code |
+
+> **Inventory source of truth**: the Redis Set `session:seats:{sessionId}` is the only authoritative inventory. `seat.status` is updated asynchronously after payment for historical records only — it does not participate in real-time inventory decisions.
 
 ---
 
-## 部署架构
+## Redis Design
+
+| Key | Type | Description | TTL |
+|-----|------|-------------|-----|
+| `session:seats:{sessionId}` | Set | Available seat ID pool | 7 days |
+| `seat:info:{seatId}` | Hash | Seat details: row / col / type / price | 7 days |
+| `seat:lock:{sessionId}:{seatId}` | String | Seat lock (value = userId) | 5 min |
+| `session:purchase:{sessionId}:{userId}` | String | Per-user purchase count | 7 days |
+| `ticket:order:stream` | Stream | Booking request queue | — |
+
+All critical operations use **Lua scripts** for atomicity: purchase-limit check (GET + INCR), batch seat locking (SETNX with full rollback on any failure), seat release (DEL lock + SADD back to pool).
+
+---
+
+## Deployment Architecture
 
 ```
                       ┌──────────────────┐
                       │      Nginx       │
-                      │  (反向代理/SSL)   │
+                      │  (Reverse Proxy) │
                       └────────┬─────────┘
                                │
                   ┌────────────┴────────────┐
@@ -177,7 +179,7 @@ mvn spring-boot:run -pl payment
          ┌────────▼────────┐      ┌────────▼────────┐
          │  admin : 8081   │      │  user  : 8082   │
          │   Spring Boot   │      │   Spring Boot   │
-         │    管理端 API    │      │    用户端 API    │
+         │   Admin API     │      │    User API     │
          └────────┬────────┘      └────────┬────────┘
                   │                         │
                   └────────────┬────────────┘
@@ -186,86 +188,88 @@ mvn spring-boot:run -pl payment
             │                  │                  │
    ┌────────▼────────┐ ┌───────▼──────┐ ┌────────▼────────┐
    │    MySQL 8      │ │   Redis 7    │ │  Redis Stream   │
-   │   (主从可选)     │ │  (缓存/锁)   │ │   (消息队列)    │
+   │  (replication   │ │ (cache/lock) │ │ (message queue) │
+   │   optional)     │ │              │ │                 │
    └─────────────────┘ └──────────────┘ └─────────────────┘
 ```
 
-- **单机**：所有组件同一台机器，docker-compose 一键启动
-- **扩展**：Nginx 负载多个 user 实例；MySQL 主从；Redis 哨兵/Sentinel
+- **Single machine** — all components on one host, started via docker-compose
+- **Scaled out** — Nginx load-balances multiple user instances; MySQL replication; Redis Sentinel
 
 ---
 
-## 核心购票流程
+## Core Booking Flow
 
 ```
-用户提交购票
+User submits booking
     │
-    ├─ Lua 限购检查（Redis）
+    ├─ Lua purchase-limit check (Redis)
     │
-    ├─ 写入 Redis Stream
+    ├─ Enqueue to Redis Stream
     │
-    └─ 返回 requestId + "QUEUED"
+    └─ Return requestId + "QUEUED"
                 │
-        TicketOrderConsumer 消费
+        TicketOrderConsumer picks up message
                 │
-        ├─ Lua 批量锁座（任一失败全量回滚）
-        ├─ DB 超卖兜底校验
-        ├─ 创建 Order（status=0，5 分钟过期）
-        └─ 创建 OrderItem
+        ├─ Lua batch seat lock (full rollback on any failure)
+        ├─ DB oversell safety check
+        ├─ Create Order (status=0, expires in 5 min)
+        └─ Create OrderItems
                 │
-        ┌───────┴───────┐
-        │               │
-    用户支付         5 分钟超时
-        │               │
-    status=1        定时任务取消
-    生成 Ticket     释放 Redis 库存
+        ┌───────┴────────┐
+        │                │
+    User pays        Timeout (5 min)
+        │                │
+    status=1         Scheduled job cancels
+    Generate         Releases Redis inventory
+    Tickets
 ```
 
 ---
 
-## 高并发设计要点
+## Concurrency Design
 
-| 问题 | 方案 |
-|------|------|
-| 超卖 | Redis Set `SREM` 原子扣库存 + DB 层兜底 |
-| 限购 | Lua 脚本原子 INCR + 阈值检查 |
-| 削峰 | Redis Stream 队列 + 后台消费者 |
-| 锁粒度 | 单座直接锁 `seat:lock`；连座 Lua 批量操作，任一失败全回滚 |
-| 超时释放 | 定时任务 30s 扫描 `idx_status_expire` 索引，兜底释放 |
-
----
-
-## 安全
-
-- 密码：BCrypt 存储
-- 认证：JWT（30 分钟过期），`@NoLogin` 注解标记公开接口
-- 防注入：MyBatis `#{}` 参数化查询
-- 金额校验：后端重新计算总价，不信任前端传值
+| Problem | Solution |
+|---------|----------|
+| Oversell | Redis Set `SREM` atomic deduction + DB safety check |
+| Purchase limit | Lua atomic INCR + threshold check |
+| Traffic spike | Redis Stream queue + async consumer |
+| Lock granularity | Single seat: direct `seat:lock`; multi-seat: Lua batch with full rollback |
+| Timeout release | Scheduled job scans `idx_status_expire` index every 30s |
 
 ---
 
-## 扩展方向
+## Security
 
-- **真实支付**：实现 `PaymentGateway` 接口对接支付宝 / 微信
-- **微服务化**：admin / user / payment 拆分独立部署 + API Gateway
-- **更大规模 MQ**：Redis Stream → RocketMQ / RabbitMQ
-- **分库分表**：订单表按 `session_id` 分片
-- **CDN**：演出海报等静态资源加速
+- Passwords stored with BCrypt
+- JWT authentication (30-minute expiry); `@NoLogin` marks public endpoints
+- SQL injection prevention via MyBatis `#{}` parameterized queries
+- Server-side price recalculation — client-supplied amounts are never trusted
 
 ---
 
-## 压测目标
+## Roadmap
 
-| 指标 | 目标值 |
-|------|--------|
-| 查询接口 P99 | < 500ms |
-| 下单 P99（MQ 削峰后） | < 2s |
-| 座位锁定 QPS（Redis 层） | 1000+ |
-| 单机并发用户 | 5000+ |
-| 万座预热耗时 | < 3s |
+- **Real payment gateways** — implement `PaymentGateway` for Alipay / WeChat Pay
+- **Microservices** — split admin / user / payment into independent services behind an API Gateway
+- **Larger-scale MQ** — replace Redis Stream with RocketMQ / RabbitMQ at higher scale
+- **Sharding** — partition the order table by `session_id`
+- **CDN** — offload show poster and static assets
+
+---
+
+## Performance Targets
+
+| Metric | Target |
+|--------|--------|
+| Query P99 latency | < 500 ms |
+| Order submit P99 (after queue buffering) | < 2 s |
+| Seat lock QPS (Redis layer) | 1,000+ |
+| Concurrent users (single node) | 5,000+ |
+| Warm-up time (10,000 seats) | < 3 s |
 
 ---
 
 ## License
 
-MIT
+[MIT](LICENSE)
