@@ -33,6 +33,11 @@ public interface SeatMapper {
     List<Seat> selectBySessionId(Long sessionId);
 
     /**
+     * 根据 ID 列表批量查询（用于下单时获取 areaId 和 pairSeatId）
+     */
+    List<Seat> selectByIds(@Param("ids") List<Long> ids);
+
+    /**
      * 批量更新座位状态
      */
     int batchUpdateStatus(@Param("ids") List<Long> ids, @Param("status") Integer status);

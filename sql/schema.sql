@@ -144,3 +144,31 @@ CREATE TABLE ticket (
     KEY idx_order_id (order_id),
     KEY idx_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='票据表';
+
+-- ===== 座位区域化重构变更 =====
+
+-- 新增：座位价格区域表
+CREATE TABLE seat_area (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    session_id  BIGINT       NOT NULL COMMENT '关联场次ID',
+    area_id     VARCHAR(32)  NOT NULL COMMENT '区域标识(如 0、1，场次内唯一)',
+    price       DECIMAL(10,2) NOT NULL COMMENT '区域售价',
+    origin_price DECIMAL(10,2) NOT NULL COMMENT '区域原价',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_session_area (session_id, area_id),
+    KEY idx_session_id (session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='座位价格区域表';
+
+-- 修改 show_session：新增网格尺寸字段
+ALTER TABLE show_session
+    ADD COLUMN row_count INT NOT NULL DEFAULT 0 COMMENT '座位网格行数',
+    ADD COLUMN col_count INT NOT NULL DEFAULT 0 COMMENT '座位网格列数';
+
+-- 修改 seat：去掉 seat_type/price，改用 type/area_id/seat_name/pair_seat_id
+ALTER TABLE seat
+    DROP COLUMN seat_type,
+    DROP COLUMN price,
+    ADD COLUMN type         INT          NOT NULL DEFAULT 1  COMMENT '座位类型: 1=普通, 2=情侣左, 3=情侣右',
+    ADD COLUMN area_id      VARCHAR(32)  NOT NULL DEFAULT '' COMMENT '价格区域ID，对应 seat_area.area_id',
+    ADD COLUMN seat_name    VARCHAR(64)  DEFAULT NULL        COMMENT '座位名称，如 1排01座',
+    ADD COLUMN pair_seat_id BIGINT       DEFAULT NULL        COMMENT '情侣连座配对座位ID，type=2/3时非空';

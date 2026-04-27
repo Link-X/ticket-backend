@@ -1,13 +1,10 @@
 package com.ticket.user.controller;
 
 import com.ticket.common.result.Result;
-import com.ticket.core.service.SeatInventoryService;
+import com.ticket.core.domain.vo.SessionSeatResponse;
 import com.ticket.core.service.ShowService;
 import com.ticket.user.config.NoLogin;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
-import java.util.Set;
 
 @NoLogin
 @RestController
@@ -15,11 +12,9 @@ import java.util.Set;
 public class ShowController {
 
     private final ShowService showService;
-    private final SeatInventoryService inventoryService;
 
-    public ShowController(ShowService showService, SeatInventoryService inventoryService) {
+    public ShowController(ShowService showService) {
         this.showService = showService;
-        this.inventoryService = inventoryService;
     }
 
     @GetMapping("/list")
@@ -37,15 +32,11 @@ public class ShowController {
         return Result.success(showService.listSessions(id));
     }
 
+    /**
+     * 获取场次座位图（含价格区域列表 + 网格化座位信息）
+     */
     @GetMapping("/session/{sessionId}/seats")
-    public Result<?> getAvailableSeats(@PathVariable Long sessionId) {
-        Set<String> seatIds = inventoryService.getAvailableSeatIds(sessionId);
-        Long count = inventoryService.getAvailableCount(sessionId);
-        return Result.success(Map.of("seatIds", seatIds, "count", count));
-    }
-
-    @GetMapping("/session/{sessionId}/seat/{seatId}")
-    public Result<?> getSeatInfo(@PathVariable Long sessionId, @PathVariable Long seatId) {
-        return Result.success(inventoryService.getSeatInfo(seatId));
+    public Result<SessionSeatResponse> getSessionSeats(@PathVariable Long sessionId) {
+        return Result.success(showService.getSeatSection(sessionId));
     }
 }

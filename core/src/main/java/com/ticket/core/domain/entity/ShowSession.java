@@ -16,6 +16,10 @@ public class ShowSession {
     private Integer totalSeats;
     private Integer limitPerUser;
     private Integer status;
+    /** 座位网格总行数 */
+    private Integer rowCount;
+    /** 座位网格总列数 */
+    private Integer colCount;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

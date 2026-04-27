@@ -1,7 +1,7 @@
 # 抢票系统 端到端验证脚本
 # 工具: IntelliJ HTTP Client / VS Code REST Client
 #
-# 执行顺序: 按步骤 1→11 依次运行
+# 执行顺序: 按步骤 1→12 依次运行
 # 前置条件:
 #   - docker-compose up -d (MySQL:3306 + Redis:6379)
 #   - admin  服务启动: 端口 8081
@@ -62,7 +62,8 @@ Content-Type: application/json
 
 ###
 # Step 4: 创建场次 (Admin) → 复制 data.id 到 @sessionId
-# 预期: {"code":200,"data":{"id":1,"showId":1,...}}
+# rowCount/colCount 定义座位网格尺寸（2排×3列）
+# 预期: {"code":200,"data":{"id":1,"showId":1,"rowCount":2,"colCount":3,...}}
 POST {{adminHost}}/api/admin/session/create
 Content-Type: application/json
 
@@ -72,11 +73,29 @@ Content-Type: application/json
   "startTime": "2026-06-01T19:00:00",
   "endTime": "2026-06-01T22:00:00",
   "totalSeats": 6,
-  "limitPerUser": 2
+  "limitPerUser": 2,
+  "rowCount": 2,
+  "colCount": 3
 }
 
 ###
-# Step 5: 批量创建座位 (Admin)
+# Step 5: 保存价格区域 (Admin)
+# area_id="0" 普通区 680元，area_id="1" VIP区 1280元
+# 预期: {"code":200,"data":"价格区域保存成功"}
+POST {{adminHost}}/api/admin/seat/area/save
+Content-Type: application/json
+
+{
+  "sessionId": {{sessionId}},
+  "areas": [
+    {"areaId": "0", "price": 680.00, "originPrice": 800.00},
+    {"areaId": "1", "price": 1280.00, "originPrice": 1500.00}
+  ]
+}
+
+###
+# Step 6: 批量创建座位 (Admin)
+# type: 1=普通, 2=情侣左, 3=情侣右；areaId 对应上一步保存的区域
 # 预期: {"code":200,"data":[{"id":1,...},{"id":2,...},...]}
 POST {{adminHost}}/api/admin/seat/batch
 Content-Type: application/json
@@ -84,32 +103,52 @@ Content-Type: application/json
 {
   "sessionId": {{sessionId}},
   "seats": [
-    {"rowNo": 1, "colNo": 1, "seatType": "STANDARD", "price": 680.00},
-    {"rowNo": 1, "colNo": 2, "seatType": "STANDARD", "price": 680.00},
-    {"rowNo": 1, "colNo": 3, "seatType": "STANDARD", "price": 680.00},
-    {"rowNo": 2, "colNo": 1, "seatType": "VIP",      "price": 1280.00},
-    {"rowNo": 2, "colNo": 2, "seatType": "VIP",      "price": 1280.00},
-    {"rowNo": 2, "colNo": 3, "seatType": "VIP",      "price": 1280.00}
+    {"rowNo": 1, "colNo": 1, "type": 1, "areaId": "0", "seatName": "1排01座"},
+    {"rowNo": 1, "colNo": 2, "type": 1, "areaId": "0", "seatName": "1排02座"},
+    {"rowNo": 1, "colNo": 3, "type": 1, "areaId": "0", "seatName": "1排03座"},
+    {"rowNo": 2, "colNo": 1, "type": 1, "areaId": "1", "seatName": "2排01座"},
+    {"rowNo": 2, "colNo": 2, "type": 1, "areaId": "1", "seatName": "2排02座"},
+    {"rowNo": 2, "colNo": 3, "type": 1, "areaId": "1", "seatName": "2排03座"}
   ]
 }
 
 ###
-# Step 6: 预热座位库存到 Redis，场次状态变为开售 (Admin)
-# 预期: {"code":200,"data":"预热完成，共 6 个座位"}
+# Step 7: 预热座位库存到 Redis，场次状态变为开售 (Admin)
+# 预期: {"code":200,"data":"预热完成，共 6 个座位，2 个价格区域"}
 POST {{adminHost}}/api/admin/seat/warmup/{{sessionId}}
 
 ###
-# Step 7: 用户端查看上架演出列表
+# Step 8: 用户端查看上架演出列表
 # 预期: {"code":200,"data":[{"id":1,"name":"五月天演唱会",...}]}
 GET {{userHost}}/api/show/list
 
 ###
-# Step 8: 查看场次可售座位（Redis 中取）
-# 预期: {"code":200,"data":{"count":6,"seatIds":[...]}}
+# Step 9: 查看场次座位图（含价格区域和网格化座位信息）
+# 预期:
+# {
+#   "code": 200,
+#   "data": {
+#     "areaPriceList": [
+#       {"areaId":"0","price":"680.00","originPrice":"800.00"},
+#       {"areaId":"1","price":"1280.00","originPrice":"1500.00"}
+#     ],
+#     "seatSection": {
+#       "rowCount": 2,
+#       "columnCount": 3,
+#       "seatRows": [
+#         {"rowsId":"1","rowsNum":"1","columns":[
+#           {"colId":"1","colNum":"1","seatName":"1排01座","type":1,"areaId":"0","status":0},
+#           ...
+#         ]},
+#         ...
+#       ]
+#     }
+#   }
+# }
 GET {{userHost}}/api/show/session/{{sessionId}}/seats
 
 ###
-# Step 9: 提交购票请求（写入 Redis Stream，异步创建订单）
+# Step 10: 提交购票请求（写入 Redis Stream，异步创建订单）
 # 需要 Authorization header
 # 预期: {"code":200,"data":{"requestId":"1234-xxx","status":"QUEUED"}}
 # 注: TicketOrderConsumer 消费后订单落库，之后可通过 /api/admin/order/query?orderNo=xxx 查询
@@ -124,12 +163,12 @@ Authorization: Bearer {{token}}
 }
 
 ###
-# Step 9.1: (等消费者处理后) Admin 查询订单确认落库 → 复制 data.id 到 @orderId
+# Step 10.1: (等消费者处理后) Admin 查询订单确认落库 → 复制 data.id 到 @orderId
 # 预期: {"code":200,"data":{"id":1,"orderNo":"...","status":0,...}}
 GET {{adminHost}}/api/admin/order/query?orderNo=<从消费者日志取 orderNo>
 
 ###
-# Step 10: 支付订单（Mock 网关，直接成功）
+# Step 11: 支付订单（Mock 网关，直接成功）
 # 预期: {"code":200,"data":{"status":"PAID","paymentNo":"...","tickets":[...]}}
 #        复制 data.tickets[0].qrCode 到 @qrCode
 POST {{userHost}}/api/payment/create
@@ -142,6 +181,6 @@ Authorization: Bearer {{token}}
 }
 
 ###
-# Step 11: 入场核验（扫码核销）
+# Step 12: 入场核验（扫码核销）
 # 预期: {"code":200,"data":{"id":...,"status":1,"verifyTime":"..."}}
 GET {{userHost}}/api/verify/qr/{{qrCode}}

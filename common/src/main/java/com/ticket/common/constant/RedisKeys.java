@@ -44,4 +44,14 @@ public class RedisKeys {
     public static String sessionLock(long sessionId) {
         return "session:lock:" + sessionId;
     }
+
+    /** 场次内某区域的价格信息 Hash（字段: price, originPrice） */
+    public static String seatAreaPrice(long sessionId, String areaId) {
+        return "session:area:price:" + sessionId + ":" + areaId;
+    }
+
+    /** requestId（Redis Stream record ID）到订单号的映射 */
+    public static String orderRequest(String requestId) {
+        return "order:request:" + requestId;
+    }
 }

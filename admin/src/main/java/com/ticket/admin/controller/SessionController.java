@@ -34,4 +34,13 @@ public class SessionController {
     public Result<?> listSessions(@RequestParam Long showId) {
         return Result.success(showService.listSessions(showId));
     }
+
+    /**
+     * 发布场次开售（需先完成座位预热）
+     */
+    @PutMapping("/{sessionId}/publish")
+    public Result<?> publishSession(@PathVariable Long sessionId) {
+        showService.publishSession(sessionId);
+        return Result.success("场次已发布开售");
+    }
 }

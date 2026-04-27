@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 订单 Mapper 接口
@@ -46,4 +47,16 @@ public interface OrderMapper {
     int updateStatusAndPayTime(@Param("id") Long id,
                                @Param("status") Integer status,
                                @Param("payTime") LocalDateTime payTime);
+
+    /**
+     * 按用户查询订单列表（按创建时间倒序，分页）
+     */
+    List<Order> selectByUserId(@Param("userId") Long userId,
+                               @Param("offset") int offset,
+                               @Param("limit") int limit);
+
+    /**
+     * 统计用户订单总数
+     */
+    int countByUserId(@Param("userId") Long userId);
 }

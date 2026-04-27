@@ -2,6 +2,7 @@ package com.ticket.core.service;
 
 import com.ticket.common.constant.RedisKeys;
 import com.ticket.core.domain.entity.Seat;
+import com.ticket.core.domain.entity.SeatArea;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,7 +14,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -33,16 +36,12 @@ class SeatInventoryServiceTest {
     private StringRedisTemplate redisTemplate;
     private SeatInventoryService seatInventoryService;
 
-    /** 测试用场次 ID */
     private static final long SESSION_ID = 100L;
-    /** 测试用用户 ID */
     private static final String USER_ID = "user-001";
-    /** 锁过期时间（秒） */
     private static final long TTL = 300L;
 
     @BeforeEach
     void setUp() {
-        // 创建 Lettuce 连接工厂，连接 Testcontainers 启动的 Redis
         LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(
                 redis.getHost(),
                 redis.getMappedPort(6379)
@@ -53,7 +52,6 @@ class SeatInventoryServiceTest {
         redisTemplate.setConnectionFactory(connectionFactory);
         redisTemplate.afterPropertiesSet();
 
-        // 每个测试前清空 Redis，保证测试独立性
         redisTemplate.getConnectionFactory().getConnection().flushDb();
 
         seatInventoryService = new SeatInventoryService(redisTemplate);
@@ -61,24 +59,32 @@ class SeatInventoryServiceTest {
 
     @AfterEach
     void tearDown() {
-        // 清理连接工厂资源（Java 11 兼容写法）
         if (redisTemplate.getConnectionFactory() instanceof LettuceConnectionFactory) {
             ((LettuceConnectionFactory) redisTemplate.getConnectionFactory()).destroy();
         }
     }
 
-    /**
-     * 构建测试用 Seat 实体
-     */
+    /** 构建普通座位（type=1，areaId="0"） */
     private Seat buildSeat(long id, int rowNo, int colNo) {
         Seat seat = new Seat();
         seat.setId(id);
         seat.setSessionId(SESSION_ID);
         seat.setRowNo(rowNo);
         seat.setColNo(colNo);
-        seat.setSeatType("STANDARD");
-        seat.setPrice(new BigDecimal("100.00"));
+        seat.setType(1);
+        seat.setAreaId("0");
+        seat.setSeatName(rowNo + "排0" + colNo + "座");
         return seat;
+    }
+
+    /** 构建价格区域 */
+    private SeatArea buildArea(String areaId, String price, String originPrice) {
+        SeatArea area = new SeatArea();
+        area.setSessionId(SESSION_ID);
+        area.setAreaId(areaId);
+        area.setPrice(new BigDecimal(price));
+        area.setOriginPrice(new BigDecimal(originPrice));
+        return area;
     }
 
     /**
@@ -86,21 +92,18 @@ class SeatInventoryServiceTest {
      */
     @Test
     void warmup_shouldAddSeatsToSet() {
-        // 准备 3 个座位
         List<Seat> seats = Arrays.asList(
                 buildSeat(1L, 1, 1),
                 buildSeat(2L, 1, 2),
                 buildSeat(3L, 1, 3)
         );
+        List<SeatArea> areas = Collections.singletonList(buildArea("0", "680.00", "800.00"));
 
-        // 执行 warmup
-        seatInventoryService.warmup(SESSION_ID, seats);
+        seatInventoryService.warmup(SESSION_ID, seats, areas);
 
-        // 验证可售数量等于 3
         Long count = seatInventoryService.getAvailableCount(SESSION_ID);
         assertEquals(3L, count, "warmup 后可售座位数量应为 3");
 
-        // 验证可售座位 ID 集合包含所有写入的座位
         Set<String> availableIds = seatInventoryService.getAvailableSeatIds(SESSION_ID);
         assertTrue(availableIds.contains("1"), "可售集合应包含座位 ID 1");
         assertTrue(availableIds.contains("2"), "可售集合应包含座位 ID 2");
@@ -121,11 +124,9 @@ class SeatInventoryServiceTest {
      */
     @Test
     void lockSeat_shouldFailWhenAlreadyLocked() {
-        // 第一次加锁成功
         boolean firstLock = seatInventoryService.lockSeat(SESSION_ID, 1L, USER_ID, TTL);
         assertTrue(firstLock, "首次锁定应成功");
 
-        // 第二次加锁同一座位，应失败
         boolean secondLock = seatInventoryService.lockSeat(SESSION_ID, 1L, "user-002", TTL);
         assertFalse(secondLock, "已被锁定的座位再次锁定应返回 false");
     }
@@ -135,22 +136,18 @@ class SeatInventoryServiceTest {
      */
     @Test
     void batchLockSeats_shouldBeAtomic() {
-        // 预先锁定座位 2（模拟已被占用）
         boolean preLock = seatInventoryService.lockSeat(SESSION_ID, 2L, "user-999", TTL);
         assertTrue(preLock, "预先锁定座位 2 应成功");
 
-        // 批量锁定 [1, 2, 3]，其中座位 2 已被锁 -> 整批应失败
         List<Long> seatIds = Arrays.asList(1L, 2L, 3L);
         boolean batchResult = seatInventoryService.batchLockSeats(SESSION_ID, seatIds, USER_ID, TTL);
         assertFalse(batchResult, "批量锁定时若某座位已被锁，整批应失败");
 
-        // 验证回滚正确：座位 1 和 3 不应存在锁（已被 Lua 脚本回滚）
         String lockKey1 = RedisKeys.seatLock(SESSION_ID, 1L);
         String lockKey3 = RedisKeys.seatLock(SESSION_ID, 3L);
         assertFalse(Boolean.TRUE.equals(redisTemplate.hasKey(lockKey1)), "失败后座位 1 的锁应已回滚");
         assertFalse(Boolean.TRUE.equals(redisTemplate.hasKey(lockKey3)), "失败后座位 3 的锁应已回滚");
 
-        // 验证被回滚的座位 1 可以重新被锁定
         boolean retryLock1 = seatInventoryService.lockSeat(SESSION_ID, 1L, USER_ID, TTL);
         assertTrue(retryLock1, "批量失败回滚后，座位 1 应可以重新锁定");
     }
@@ -160,30 +157,79 @@ class SeatInventoryServiceTest {
      */
     @Test
     void releaseSeat_shouldRemoveLockAndAddBackToSet() {
-        // 先 warmup 初始化座位集合
-        List<Seat> seats = Arrays.asList(buildSeat(1L, 1, 1));
-        seatInventoryService.warmup(SESSION_ID, seats);
+        List<Seat> seats = Collections.singletonList(buildSeat(1L, 1, 1));
+        List<SeatArea> areas = Collections.singletonList(buildArea("0", "680.00", "800.00"));
+        seatInventoryService.warmup(SESSION_ID, seats, areas);
 
-        // 锁定座位 1
         boolean locked = seatInventoryService.lockSeat(SESSION_ID, 1L, USER_ID, TTL);
         assertTrue(locked, "锁定座位应成功");
 
-        // 验证锁 key 存在
         String lockKey = RedisKeys.seatLock(SESSION_ID, 1L);
         assertTrue(Boolean.TRUE.equals(redisTemplate.hasKey(lockKey)), "锁定后锁 key 应存在");
 
-        // 释放座位
         seatInventoryService.releaseSeat(SESSION_ID, 1L);
 
-        // 验证锁 key 已删除
         assertFalse(Boolean.TRUE.equals(redisTemplate.hasKey(lockKey)), "释放后锁 key 应被删除");
 
-        // 验证座位重新加入可售集合
         Set<String> availableIds = seatInventoryService.getAvailableSeatIds(SESSION_ID);
         assertTrue(availableIds.contains("1"), "释放后座位应重新出现在可售集合中");
 
-        // 验证可以再次锁定
         boolean relockResult = seatInventoryService.lockSeat(SESSION_ID, 1L, USER_ID, TTL);
         assertTrue(relockResult, "释放后应可以再次锁定座位");
+    }
+
+    /**
+     * 测试6：batchGetSeatStatus 正确返回三种状态
+     * 可售(0)、已锁(1)、已售(2)
+     */
+    @Test
+    void batchGetSeatStatus_shouldReturnCorrectStatus() {
+        List<Seat> seats = Arrays.asList(
+                buildSeat(1L, 1, 1),
+                buildSeat(2L, 1, 2),
+                buildSeat(3L, 1, 3)
+        );
+        List<SeatArea> areas = Collections.singletonList(buildArea("0", "680.00", "800.00"));
+        seatInventoryService.warmup(SESSION_ID, seats, areas);
+
+        // warmup 后全部可售
+        Map<Long, Integer> status = seatInventoryService.batchGetSeatStatus(SESSION_ID, Arrays.asList(1L, 2L, 3L));
+        assertEquals(0, status.get(1L), "座位 1 应为可售(0)");
+        assertEquals(0, status.get(2L), "座位 2 应为可售(0)");
+        assertEquals(0, status.get(3L), "座位 3 应为可售(0)");
+
+        // 锁定座位 2 → 状态变为已锁(1)
+        seatInventoryService.lockSeat(SESSION_ID, 2L, USER_ID, TTL);
+        status = seatInventoryService.batchGetSeatStatus(SESSION_ID, Arrays.asList(1L, 2L, 3L));
+        assertEquals(0, status.get(1L), "座位 1 仍应为可售(0)");
+        assertEquals(1, status.get(2L), "座位 2 锁定后应为已锁(1)");
+        assertEquals(0, status.get(3L), "座位 3 仍应为可售(0)");
+
+        // 消费座位 2（支付成功）→ 状态变为已售(2)
+        seatInventoryService.consumeSeat(SESSION_ID, 2L, USER_ID);
+        status = seatInventoryService.batchGetSeatStatus(SESSION_ID, Arrays.asList(1L, 2L, 3L));
+        assertEquals(2, status.get(2L), "支付后座位 2 应为已售(2)");
+    }
+
+    /**
+     * 测试7：getAreaPrice 在 warmup 后能正确返回区域价格
+     */
+    @Test
+    void getAreaPrice_shouldReturnPriceAfterWarmup() {
+        List<Seat> seats = Collections.singletonList(buildSeat(1L, 1, 1));
+        List<SeatArea> areas = Arrays.asList(
+                buildArea("0", "680.00", "800.00"),
+                buildArea("1", "1280.00", "1500.00")
+        );
+        seatInventoryService.warmup(SESSION_ID, seats, areas);
+
+        String price0 = seatInventoryService.getAreaPrice(SESSION_ID, "0");
+        assertEquals("680.00", price0, "区域 0 的价格应为 680.00");
+
+        String price1 = seatInventoryService.getAreaPrice(SESSION_ID, "1");
+        assertEquals("1280.00", price1, "区域 1 的价格应为 1280.00");
+
+        String priceNull = seatInventoryService.getAreaPrice(SESSION_ID, "99");
+        assertNull(priceNull, "不存在的区域应返回 null");
     }
 }

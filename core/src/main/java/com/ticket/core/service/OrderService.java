@@ -6,15 +6,21 @@ import com.ticket.common.util.SnowflakeIdGenerator;
 import com.ticket.core.domain.dto.OrderCreateRequest;
 import com.ticket.core.domain.entity.Order;
 import com.ticket.core.domain.entity.OrderItem;
+import com.ticket.core.domain.entity.Seat;
 import com.ticket.core.mapper.OrderItemMapper;
 import com.ticket.core.mapper.OrderMapper;
+import com.ticket.core.mapper.SeatMapper;
 import org.springframework.stereotype.Service;
 
+import com.ticket.core.domain.dto.OrderStatusResponse;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 订单服务 — 负责创建订单、取消订单及查询订单信息
@@ -26,17 +32,19 @@ public class OrderService {
     private final OrderItemMapper orderItemMapper;
     private final SeatInventoryService inventoryService;
     private final PurchaseLimitService purchaseLimitService;
-    /** 雪花算法 ID 生成器，workerId=1，dataCenterId=1 */
+    private final SeatMapper seatMapper;
     private final SnowflakeIdGenerator snowflake = new SnowflakeIdGenerator(1, 1);
 
     public OrderService(OrderMapper orderMapper,
                         OrderItemMapper orderItemMapper,
                         SeatInventoryService inventoryService,
-                        PurchaseLimitService purchaseLimitService) {
+                        PurchaseLimitService purchaseLimitService,
+                        SeatMapper seatMapper) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.inventoryService = inventoryService;
         this.purchaseLimitService = purchaseLimitService;
+        this.seatMapper = seatMapper;
     }
 
     /**
@@ -54,40 +62,58 @@ public class OrderService {
         for (Long seatId : seatIds) {
             int count = orderItemMapper.countBySeatIdAndValidOrder(seatId);
             if (count > 0) {
-                //释放当前创建订单选择位置的 Redis 锁
                 for (Long id : seatIds) {
                     inventoryService.releaseSeat(sessionId, id);
                 }
-                // 回滚限购计数
                 purchaseLimitService.decrement(sessionId, userId);
                 throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
             }
         }
 
-        // 2. 计算总价，构建 OrderItem 列表
+        // 2. 从 DB 加载座位信息，校验情侣连座完整性
+        List<Seat> seatList = seatMapper.selectByIds(seatIds);
+        if (seatList.size() != seatIds.size()) {
+            for (Long id : seatIds) inventoryService.releaseSeat(sessionId, id);
+            purchaseLimitService.decrement(sessionId, userId);
+            throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
+        }
+
+        Set<Long> seatIdSet = new HashSet<>(seatIds);
+        for (Seat seat : seatList) {
+            // type=2（情侣左）或 type=3（情侣右）必须与配对座位同时出现在本次下单中
+            if (seat.getType() == 2 || seat.getType() == 3) {
+                if (seat.getPairSeatId() == null || !seatIdSet.contains(seat.getPairSeatId())) {
+                    for (Long id : seatIds) inventoryService.releaseSeat(sessionId, id);
+                    purchaseLimitService.decrement(sessionId, userId);
+                    throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
+                }
+            }
+        }
+
+        // 3. 计算总价（从 Redis 区域价格缓存取，Redis miss 则释放并抛出异常）
+        Map<Long, Seat> seatMap = seatList.stream()
+                .collect(Collectors.toMap(Seat::getId, s -> s));
+
         List<OrderItem> items = new ArrayList<>();
         for (Long seatId : seatIds) {
-            Map<Object, Object> info = inventoryService.getSeatInfo(seatId);
-            // 防御：Redis 中座位信息不存在或 price 字段为空时，释放已锁座位并回滚限购
-            if (info == null || info.isEmpty() || info.get("price") == null) {
-                for (Long id : seatIds) {
-                    inventoryService.releaseSeat(sessionId, id);
-                }
-                purchaseLimitService.decrement(sessionId, request.getUserId());
+            Seat seat = seatMap.get(seatId);
+            String priceStr = inventoryService.getAreaPrice(sessionId, seat.getAreaId());
+            if (priceStr == null) {
+                for (Long id : seatIds) inventoryService.releaseSeat(sessionId, id);
+                purchaseLimitService.decrement(sessionId, userId);
                 throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
             }
-            BigDecimal price = new BigDecimal((String) info.get("price"));
+            BigDecimal price = new BigDecimal(priceStr);
             OrderItem item = new OrderItem();
-            item.setOrderId(0L); // 暂占位，后续更新
+            item.setOrderId(0L);
             item.setSeatId(seatId);
             item.setPrice(price);
-            item.setSeatInfo("row:" + info.get("row")
-                    + ",col:" + info.get("col")
-                    + ",type:" + info.get("type"));
+            item.setSeatInfo(seat.getSeatName() != null ? seat.getSeatName()
+                    : "row:" + seat.getRowNo() + ",col:" + seat.getColNo());
             items.add(item);
         }
 
-        // 3. 计算总金额并创建 Order
+        // 4. 计算总金额并创建订单
         BigDecimal totalAmount = items.stream()
                 .map(OrderItem::getPrice)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -104,11 +130,16 @@ public class OrderService {
 
         orderMapper.insert(order);
 
-        // 4. 批量插入 OrderItem（先更新 orderId）
+        // 5. 批量插入 OrderItem
         for (OrderItem item : items) {
             item.setOrderId(order.getId());
         }
         orderItemMapper.batchInsert(items);
+
+        // 6. 消费座位：从可售集合移除 + 删除锁（与 submit 时的 batchLockSeats 对应）
+        for (Long seatId : seatIds) {
+            inventoryService.consumeSeat(sessionId, seatId, String.valueOf(userId));
+        }
 
         return order;
     }
@@ -162,5 +193,38 @@ public class OrderService {
      */
     public List<OrderItem> getOrderItems(Long orderId) {
         return orderItemMapper.selectByOrderId(orderId);
+    }
+
+    /**
+     * 查询用户订单列表（分页）
+     *
+     * @param userId 用户 ID
+     * @param page   页码（从 1 开始）
+     * @param size   每页条数
+     * @return 订单响应列表
+     */
+    public List<OrderStatusResponse> getUserOrders(Long userId, int page, int size) {
+        int offset = (page - 1) * size;
+        List<Order> orders = orderMapper.selectByUserId(userId, offset, size);
+
+        return orders.stream().map(order -> {
+            List<OrderItem> items = orderItemMapper.selectByOrderId(order.getId());
+            OrderStatusResponse resp = new OrderStatusResponse();
+            resp.setOrderNo(order.getOrderNo());
+            resp.setStatus(order.getStatus());
+            resp.setTotalAmount(order.getTotalAmount());
+            resp.setCreateTime(order.getCreateTime());
+            resp.setPayTime(order.getPayTime());
+            resp.setExpireTime(order.getExpireTime());
+            resp.setSeatInfos(items.stream().map(OrderItem::getSeatInfo).collect(Collectors.toList()));
+            return resp;
+        }).collect(Collectors.toList());
+    }
+
+    /**
+     * 统计用户订单总数
+     */
+    public int countUserOrders(Long userId) {
+        return orderMapper.countByUserId(userId);
     }
 }
