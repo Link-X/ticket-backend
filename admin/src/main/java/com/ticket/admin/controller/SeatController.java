@@ -3,11 +3,9 @@ package com.ticket.admin.controller;
 import com.ticket.common.result.Result;
 import com.ticket.core.domain.entity.Seat;
 import com.ticket.core.domain.entity.SeatArea;
-import com.ticket.core.domain.entity.ShowSession;
 import com.ticket.core.mapper.SeatMapper;
 import com.ticket.core.service.SeatAreaService;
 import com.ticket.core.service.SeatInventoryService;
-import com.ticket.core.service.ShowService;
 import lombok.Data;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,16 +18,13 @@ public class SeatController {
 
     private final SeatMapper seatMapper;
     private final SeatInventoryService inventoryService;
-    private final ShowService showService;
     private final SeatAreaService seatAreaService;
 
     public SeatController(SeatMapper seatMapper,
                           SeatInventoryService inventoryService,
-                          ShowService showService,
                           SeatAreaService seatAreaService) {
         this.seatMapper = seatMapper;
         this.inventoryService = inventoryService;
-        this.showService = showService;
         this.seatAreaService = seatAreaService;
     }
 
@@ -78,7 +73,7 @@ public class SeatController {
     }
 
     /**
-     * 预热：将座位库存和区域价格写入 Redis，并将场次状态置为开售(status=1)
+     * 预热：将座位库存和区域价格写入 Redis（不开售，需另调 /session/{id}/publish）
      */
     @PostMapping("/warmup/{sessionId}")
     public Result<?> warmupSeats(@PathVariable Long sessionId) {
@@ -91,12 +86,6 @@ public class SeatController {
             return Result.fail(400, "该场次暂无价格区域数据，请先调用 /area/save");
         }
         inventoryService.warmup(sessionId, seats, areas);
-
-        ShowSession session = showService.getSession(sessionId);
-        if (session != null) {
-            session.setStatus(1);
-            showService.updateSession(session);
-        }
         return Result.success("预热完成，共 " + seats.size() + " 个座位，" + areas.size() + " 个价格区域");
     }
 

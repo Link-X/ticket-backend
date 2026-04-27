@@ -118,6 +118,19 @@ public class ShowService {
     }
 
     /**
+     * 发布场次：将状态置为开售（status=1）
+     */
+    public void publishSession(Long sessionId) {
+        ShowSession session = showSessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new com.ticket.common.exception.BusinessException(
+                    com.ticket.common.exception.ErrorCode.PARAM_ERROR, "场次不存在");
+        }
+        session.setStatus(1);
+        showSessionMapper.update(session);
+    }
+
+    /**
      * 查询场次的完整座位图和价格区域列表
      * - areaPriceList：该场次所有价格区域
      * - seatSection：按 rowCount×colCount 网格构建，空位以 type=0 占位

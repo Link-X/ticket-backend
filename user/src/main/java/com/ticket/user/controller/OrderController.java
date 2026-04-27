@@ -2,10 +2,15 @@ package com.ticket.user.controller;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ticket.common.constant.RedisKeys;
 import com.ticket.common.exception.BusinessException;
 import com.ticket.common.exception.ErrorCode;
 import com.ticket.common.result.Result;
 import com.ticket.core.domain.dto.OrderCreateRequest;
+import com.ticket.core.domain.dto.OrderStatusResponse;
+import com.ticket.core.domain.entity.Order;
+import com.ticket.core.domain.entity.OrderItem;
+import com.ticket.core.service.OrderService;
 import com.ticket.core.service.PurchaseLimitService;
 import com.ticket.core.service.SeatInventoryService;
 import com.ticket.core.service.ShowService;
@@ -19,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/order")
@@ -27,6 +33,7 @@ public class OrderController {
     private final ShowService showService;
     private final PurchaseLimitService purchaseLimitService;
     private final SeatInventoryService inventoryService;
+    private final OrderService orderService;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
@@ -39,11 +46,13 @@ public class OrderController {
     public OrderController(ShowService showService,
                            PurchaseLimitService purchaseLimitService,
                            SeatInventoryService inventoryService,
+                           OrderService orderService,
                            StringRedisTemplate redisTemplate,
                            ObjectMapper objectMapper) {
         this.showService = showService;
         this.purchaseLimitService = purchaseLimitService;
         this.inventoryService = inventoryService;
+        this.orderService = orderService;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
     }
@@ -88,10 +97,35 @@ public class OrderController {
         return Result.success(Map.of("requestId", requestId, "status", "QUEUED"));
     }
 
+    @GetMapping("/list")
+    public Result<?> list(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        List<OrderStatusResponse> orders = orderService.getUserOrders(userId, page, size);
+        int total = orderService.countUserOrders(userId);
+        return Result.success(Map.of("total", total, "list", orders));
+    }
+
     @GetMapping("/query/{requestId}")
     public Result<?> query(@PathVariable String requestId) {
-        // 占位实现，后续可按 requestId 查询订单状态
-        return Result.success(Map.of("requestId", requestId, "status", "PROCESSING"));
+        String orderNo = redisTemplate.opsForValue().get(RedisKeys.orderRequest(requestId));
+        if (orderNo == null) {
+            return Result.success(Map.of("requestId", requestId, "status", "QUEUED"));
+        }
+        Order order = orderService.getByOrderNo(orderNo);
+        if (order == null) {
+            return Result.success(Map.of("requestId", requestId, "status", "QUEUED"));
+        }
+        List<OrderItem> items = orderService.getOrderItems(order.getId());
+
+        OrderStatusResponse resp = new OrderStatusResponse();
+        resp.setOrderNo(order.getOrderNo());
+        resp.setStatus(order.getStatus());
+        resp.setTotalAmount(order.getTotalAmount());
+        resp.setExpireTime(order.getExpireTime());
+        resp.setSeatInfos(items.stream().map(OrderItem::getSeatInfo).collect(Collectors.toList()));
+        return Result.success(resp);
     }
 
     @Data

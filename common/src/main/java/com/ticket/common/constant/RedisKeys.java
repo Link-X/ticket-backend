@@ -49,4 +49,9 @@ public class RedisKeys {
     public static String seatAreaPrice(long sessionId, String areaId) {
         return "session:area:price:" + sessionId + ":" + areaId;
     }
+
+    /** requestId（Redis Stream record ID）到订单号的映射 */
+    public static String orderRequest(String requestId) {
+        return "order:request:" + requestId;
+    }
 }

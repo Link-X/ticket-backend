@@ -62,4 +62,18 @@
         WHERE id = #{id}
     </update>
 
+    <!-- 按用户查询订单列表（按创建时间倒序，分页） -->
+    <select id="selectByUserId" resultMap="OrderResultMap">
+        SELECT id, order_no, user_id, session_id, total_amount, status, pay_time, expire_time, create_time, update_time
+        FROM `order`
+        WHERE user_id = #{userId}
+        ORDER BY create_time DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 统计用户订单总数 -->
+    <select id="countByUserId" resultType="int">
+        SELECT COUNT(*) FROM `order` WHERE user_id = #{userId}
+    </select>
+
 </mapper>

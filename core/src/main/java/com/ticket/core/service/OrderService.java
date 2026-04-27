@@ -12,6 +12,7 @@ import com.ticket.core.mapper.OrderMapper;
 import com.ticket.core.mapper.SeatMapper;
 import org.springframework.stereotype.Service;
 
+import com.ticket.core.domain.dto.OrderStatusResponse;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -192,5 +193,38 @@ public class OrderService {
      */
     public List<OrderItem> getOrderItems(Long orderId) {
         return orderItemMapper.selectByOrderId(orderId);
+    }
+
+    /**
+     * 查询用户订单列表（分页）
+     *
+     * @param userId 用户 ID
+     * @param page   页码（从 1 开始）
+     * @param size   每页条数
+     * @return 订单响应列表
+     */
+    public List<OrderStatusResponse> getUserOrders(Long userId, int page, int size) {
+        int offset = (page - 1) * size;
+        List<Order> orders = orderMapper.selectByUserId(userId, offset, size);
+
+        return orders.stream().map(order -> {
+            List<OrderItem> items = orderItemMapper.selectByOrderId(order.getId());
+            OrderStatusResponse resp = new OrderStatusResponse();
+            resp.setOrderNo(order.getOrderNo());
+            resp.setStatus(order.getStatus());
+            resp.setTotalAmount(order.getTotalAmount());
+            resp.setCreateTime(order.getCreateTime());
+            resp.setPayTime(order.getPayTime());
+            resp.setExpireTime(order.getExpireTime());
+            resp.setSeatInfos(items.stream().map(OrderItem::getSeatInfo).collect(Collectors.toList()));
+            return resp;
+        }).collect(Collectors.toList());
+    }
+
+    /**
+     * 统计用户订单总数
+     */
+    public int countUserOrders(Long userId) {
+        return orderMapper.countByUserId(userId);
     }
 }

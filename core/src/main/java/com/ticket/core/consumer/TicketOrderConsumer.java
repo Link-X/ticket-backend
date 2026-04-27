@@ -1,7 +1,9 @@
 package com.ticket.core.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ticket.common.constant.RedisKeys;
 import com.ticket.core.domain.dto.OrderCreateRequest;
+import com.ticket.core.domain.entity.Order;
 import com.ticket.core.service.OrderService;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -111,7 +113,14 @@ public class TicketOrderConsumer {
             OrderCreateRequest request = objectMapper.readValue(data, OrderCreateRequest.class);
 
             // 调用订单服务创建订单
-            orderService.createOrder(request);
+            Order order = orderService.createOrder(request);
+
+            // 写入 requestId -> orderNo 映射，供前端轮询查询（30 分钟过期）
+            redisTemplate.opsForValue().set(
+                    RedisKeys.orderRequest(record.getId().getValue()),
+                    order.getOrderNo(),
+                    Duration.ofMinutes(30)
+            );
 
             // 确认消息已消费（XACK）
             redisTemplate.opsForStream().acknowledge(streamKey, groupName, record.getId());
