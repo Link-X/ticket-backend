@@ -77,6 +77,19 @@ public class OrderController {
         return Result.success(orderService.buildStatusResponse(order));
     }
 
+    @GetMapping("/{id}")
+    public Result<OrderStatusResponse> detail(@PathVariable Long id) {
+        Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Order order = orderService.getById(id);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "订单不存在");
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        return Result.success(orderService.buildStatusResponse(order));
+    }
+
     @GetMapping("/list")
     public Result<?> list(
             @RequestParam(defaultValue = "1") int page,

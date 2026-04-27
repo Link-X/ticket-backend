@@ -115,6 +115,7 @@ The default profile is `dev`. Database password is `root123`. Edit each module's
 | GET  | `/api/show/{id}/sessions` | List sessions | ✗ |
 | GET  | `/api/show/session/{id}/seats` | Available seat map (with real-time status) | ✗ |
 | POST | `/api/order/submit` | Lock seats + create order, returns full order immediately | ✓ |
+| GET  | `/api/order/{id}` | Order detail (owner only) | ✓ |
 | GET  | `/api/order/list` | My orders (supports date range filter + pagination) | ✓ |
 | POST | `/api/payment/create` | Pay order | ✓ |
 | GET  | `/api/verify/qr/{qrCode}` | Verify by QR code | ✗ |

@@ -200,6 +200,10 @@ public class OrderService {
         return orderMapper.selectByOrderNo(orderNo);
     }
 
+    public Order getById(Long orderId) {
+        return orderMapper.selectById(orderId);
+    }
+
     /**
      * 查询订单的所有订单项
      *

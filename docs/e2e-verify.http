@@ -1,9 +1,9 @@
 # 抢票系统 端到端验证脚本
 # 工具: IntelliJ HTTP Client / VS Code REST Client
 #
-# 执行顺序: 按步骤 1→12 依次运行
+# 执行顺序: 按步骤 1→13 依次运行
 # 前置条件:
-#   - docker-compose up -d (MySQL:3306 + Redis:6379)
+#   - docker-compose up -d  (MySQL:3306 + Redis:6379 + RabbitMQ:5672)
 #   - admin  服务启动: 端口 8081
 #   - user   服务启动: 端口 8082
 #
@@ -20,7 +20,7 @@
 @showId    = 1
 @sessionId = 1
 @orderId   = 1
-@qrCode    = <支付后从 tickets[0].qrCode 取>
+@qrCode    = <支付后等票券异步生成，从 Admin 查询 ticket 表取 qrCode>
 
 ###
 # Step 1: 注册用户
@@ -113,17 +113,24 @@ Content-Type: application/json
 }
 
 ###
-# Step 7: 预热座位库存到 Redis，场次状态变为开售 (Admin)
+# Step 7: 发布场次开售 (Admin)
+# 场次状态变为"已发布/开售"
+# 预期: {"code":200,"data":"发布成功"}
+PUT {{adminHost}}/api/admin/session/{{sessionId}}/publish
+
+###
+# Step 8: 预热座位库存到 Redis (Admin)
+# 将座位 ID 写入 Redis Set，并缓存座位详情和价格区域
 # 预期: {"code":200,"data":"预热完成，共 6 个座位，2 个价格区域"}
 POST {{adminHost}}/api/admin/seat/warmup/{{sessionId}}
 
 ###
-# Step 8: 用户端查看上架演出列表
+# Step 9: 用户端查看上架演出列表
 # 预期: {"code":200,"data":[{"id":1,"name":"五月天演唱会",...}]}
 GET {{userHost}}/api/show/list
 
 ###
-# Step 9: 查看场次座位图（含价格区域和网格化座位信息）
+# Step 10: 查看场次座位图（含价格区域和网格化座位信息）
 # 预期:
 # {
 #   "code": 200,
@@ -148,11 +155,27 @@ GET {{userHost}}/api/show/list
 GET {{userHost}}/api/show/session/{{sessionId}}/seats
 
 ###
-# Step 10: 提交购票请求（写入 Redis Stream，异步创建订单）
+# Step 11: 提交购票请求（同步锁座 + 建单，直接返回完整订单）
 # 需要 Authorization header
-# 预期: {"code":200,"data":{"requestId":"1234-xxx","status":"QUEUED"}}
-# 注: TicketOrderConsumer 消费后订单落库，之后可通过 /api/admin/order/query?orderNo=xxx 查询
-#     复制 orderId (从 admin 查询结果取) 到 @orderId
+# 预期:
+# {
+#   "code": 200,
+#   "data": {
+#     "orderId": 1,
+#     "orderNo": "...",
+#     "status": 0,
+#     "showName": "五月天演唱会",
+#     "showVenue": "国家体育场",
+#     "sessionName": "北京场 2026-06-01",
+#     "sessionStartTime": "2026-06-01T19:00:00",
+#     "seats": [{"seatId":1,"seatName":"1排01座","price":680.00}, ...],
+#     "totalAmount": 1360.00,
+#     "expireTime": "...",       ← 5分钟后过期，前端据此展示倒计时
+#     "remainSeconds": 299
+#   }
+# }
+# 复制 data.orderId 到 @orderId
+# 注: 同时触发 RabbitMQ 超时消息（TTL=5分钟），超时未支付自动取消并释放库存
 POST {{userHost}}/api/order/submit
 Content-Type: application/json
 Authorization: Bearer {{token}}
@@ -163,14 +186,20 @@ Authorization: Bearer {{token}}
 }
 
 ###
-# Step 10.1: (等消费者处理后) Admin 查询订单确认落库 → 复制 data.id 到 @orderId
-# 预期: {"code":200,"data":{"id":1,"orderNo":"...","status":0,...}}
-GET {{adminHost}}/api/admin/order/query?orderNo=<从消费者日志取 orderNo>
+# Step 11.1: 查询订单详情（验证 IDOR 防护：只能查自己的订单）
+# 预期: {"code":200,"data":{... 同 submit 响应结构 ...}}
+# 若 orderId 属于其他用户，预期: {"code":403,"message":"禁止访问"}
+GET {{userHost}}/api/order/{{orderId}}
+Authorization: Bearer {{token}}
 
 ###
-# Step 11: 支付订单（Mock 网关，直接成功）
-# 预期: {"code":200,"data":{"status":"PAID","paymentNo":"...","tickets":[...]}}
-#        复制 data.tickets[0].qrCode 到 @qrCode
+# Step 12: 支付订单（Mock 网关，直接成功）
+# 预期: {"code":200,"data":{"status":"PAID","paymentNo":"..."}}
+# 注: 支付成功后通过 RabbitMQ Fanout 异步触发：
+#     - ticket.generate.queue → 生成票券（含 qrCode / ticketNo）
+#     - inventory.sync.queue  → 同步 seat.status = 已售
+#     - notification.queue    → 通知（预留）
+# 如需获取 qrCode 做核验，稍等片刻后查询数据库 ticket 表或通过 Admin 接口查询
 POST {{userHost}}/api/payment/create
 Content-Type: application/json
 Authorization: Bearer {{token}}
@@ -181,6 +210,7 @@ Authorization: Bearer {{token}}
 }
 
 ###
-# Step 12: 入场核验（扫码核销）
+# Step 13: 入场核验（扫码核销）
+# qrCode 从 ticket 表 qr_code 字段取（支付成功后异步生成，通常毫秒级完成）
 # 预期: {"code":200,"data":{"id":...,"status":1,"verifyTime":"..."}}
 GET {{userHost}}/api/verify/qr/{{qrCode}}

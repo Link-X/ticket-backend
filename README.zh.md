@@ -115,6 +115,7 @@ mvn spring-boot:run -pl user
 | GET  | `/api/show/{id}/sessions` | 场次列表 | ✗ |
 | GET  | `/api/show/session/{id}/seats` | 可售座位图（含实时状态） | ✗ |
 | POST | `/api/order/submit` | 锁座 + 建单，直接返回完整订单 | ✓ |
+| GET  | `/api/order/{id}` | 订单详情（仅限本人） | ✓ |
 | GET  | `/api/order/list` | 我的订单（支持日期范围筛选、分页） | ✓ |
 | POST | `/api/payment/create` | 支付订单 | ✓ |
 | GET  | `/api/verify/qr/{qrCode}` | 二维码核验 | ✗ |
