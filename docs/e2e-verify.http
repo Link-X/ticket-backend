@@ -7,19 +7,20 @@
 #   - admin  服务启动: 端口 8081
 #   - user   服务启动: 端口 8082
 #
-# 说明: token / sessionId / orderId / qrCode 需从上一步响应中
+# 说明: token / sessionId / orderNo / qrCode 需从上一步响应中
 #       复制到下方对应变量后再执行后续请求
 
 @adminHost = http://localhost:8081
 @userHost  = http://localhost:8082
 
 # 登录后将 token 填到这里
-@token = eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiI3MDM4OTU1MzUyODcyNzU1MjAiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiaWF0IjoxNzc3MjgwOTczLCJleHAiOjE3NzcyODI3NzN9.GqDIb9TXKtb2JO8hvm7tXVKaitsR1MW93I82u6g1NRDjxrq5Sh2xNhAMzcu-4sVq
+@token = eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiI3MDM4OTU1MzUyODcyNzU1MjAiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiaWF0IjoxNzc3MjgzMTA4LCJleHAiOjE3NzcyODQ5MDh9.YS24mOjlkJ8Bv3HAq_U469cZUN-irFLj_k-x_KoqDwkUyOTPzoQJmCq9Z5wuWHuu
 
 # 后续步骤自动依赖的 ID（从响应中取，手动填入）
 @showId    = 1
 @sessionId = 1
-@orderId   = 1
+@orderNo   = 703904632572874752
+@orderId   = <从 submit 响应 data.orderId 复制，支付时用>
 @qrCode    = <支付后等票券异步生成，从 Admin 查询 ticket 表取 qrCode>
 
 ###
@@ -152,7 +153,7 @@ GET {{userHost}}/api/show/list
 #     }
 #   }
 # }
-GET {{userHost}}/api/show/session/{{sessionId}}/seats
+GET {{userHost}}/api/show/session/seats?sessionId={{sessionId}}
 
 ###
 # Step 11: 提交购票请求（同步锁座 + 建单，直接返回完整订单）
@@ -174,7 +175,7 @@ GET {{userHost}}/api/show/session/{{sessionId}}/seats
 #     "remainSeconds": 299
 #   }
 # }
-# 复制 data.orderId 到 @orderId
+# 复制 data.orderNo 到 @orderNo，复制 data.orderId 到 @orderId
 # 注: 同时触发 RabbitMQ 超时消息（TTL=5分钟），超时未支付自动取消并释放库存
 POST {{userHost}}/api/order/submit
 Content-Type: application/json
@@ -188,8 +189,8 @@ Authorization: Bearer {{token}}
 ###
 # Step 11.1: 查询订单详情（验证 IDOR 防护：只能查自己的订单）
 # 预期: {"code":200,"data":{... 同 submit 响应结构 ...}}
-# 若 orderId 属于其他用户，预期: {"code":403,"message":"禁止访问"}
-GET {{userHost}}/api/order/{{orderId}}
+# 若 orderNo 属于其他用户，预期: {"code":403,"message":"禁止访问"}
+GET {{userHost}}/api/order/orderDetails?orderNo={{orderNo}}
 Authorization: Bearer {{token}}
 
 ###

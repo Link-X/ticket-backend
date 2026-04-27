@@ -315,7 +315,7 @@ public class SeatInventoryService {
         Map<Long, Boolean> lockedMap = new HashMap<>();
         for (int i = 0; i < inAvailable.size(); i++) {
             Object result = existsResults.get(i);
-            boolean locked = result instanceof Long && (Long) result > 0;
+            boolean locked = Boolean.TRUE.equals(result) || (result instanceof Long && (Long) result > 0);
             lockedMap.put(inAvailable.get(i), locked);
         }
 

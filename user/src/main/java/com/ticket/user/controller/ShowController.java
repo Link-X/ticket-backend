@@ -35,8 +35,8 @@ public class ShowController {
     /**
      * 获取场次座位图（含价格区域列表 + 网格化座位信息）
      */
-    @GetMapping("/session/{sessionId}/seats")
-    public Result<SessionSeatResponse> getSessionSeats(@PathVariable Long sessionId) {
+    @GetMapping("/session/seats")
+    public Result<SessionSeatResponse> getSessionSeats(@RequestParam Long sessionId) {
         return Result.success(showService.getSeatSection(sessionId));
     }
 }

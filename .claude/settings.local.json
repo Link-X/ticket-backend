@@ -20,7 +20,8 @@
       "Bash(mvn dependency:get -Dartifact=com.github.docker-java:docker-java-api:3.4.1 -q)",
       "Bash(unzip -p ~/.m2/repository/com/github/docker-java/docker-java-api/3.4.2/docker-java-api-3.4.2.jar)",
       "Bash(unzip -p ~/.m2/repository/com/github/docker-java/docker-java-transport-zerodep/3.4.2/docker-java-transport-zerodep-3.4.2.jar)",
-      "Bash(unzip -p ~/.m2/repository/com/github/docker-java/docker-java-transport-zerodep/3.7.1/docker-java-transport-zerodep-3.7.1.jar)"
+      "Bash(unzip -p ~/.m2/repository/com/github/docker-java/docker-java-transport-zerodep/3.7.1/docker-java-transport-zerodep-3.7.1.jar)",
+      "Bash(xargs cat *)"
     ]
   }
 }

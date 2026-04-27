@@ -77,10 +77,10 @@ public class OrderController {
         return Result.success(orderService.buildStatusResponse(order));
     }
 
-    @GetMapping("/{id}")
-    public Result<OrderStatusResponse> detail(@PathVariable Long id) {
+    @GetMapping("/orderDetails")
+    public Result<OrderStatusResponse> detail(@RequestParam String orderNo) {
         Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        Order order = orderService.getById(id);
+        Order order = orderService.getByOrderNo(orderNo);
         if (order == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "订单不存在");
         }
