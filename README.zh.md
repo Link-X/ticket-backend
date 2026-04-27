@@ -4,21 +4,24 @@
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.x-brightgreen)
 ![MySQL](https://img.shields.io/badge/MySQL-8.x-orange)
 ![Redis](https://img.shields.io/badge/Redis-7.x-red)
+![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.x-ff6600)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 [English](README.md)
 
-面向千~万级并发场景的抢票系统后端，支持演出管理、选座购票、Redis 库存管理、订单超时取消、Mock 支付与入场核验。采用 Maven 多模块架构，各模块独立部署。
+面向千～万级并发场景的抢票系统后端，支持演出管理、选座购票、Redis 库存管理、订单超时自动取消、Mock 支付与入场核验。采用 Maven 多模块架构，各模块独立部署。
 
 ---
 
 ## 功能特性
 
-- **演出管理**：演出/场次/座位的 CRUD，管理端预热座位库存到 Redis
-- **抢票核心**：Lua 脚本原子限购检查 + Redis Stream 削峰 + 异步消费者创建订单
-- **防超卖**：Redis Set 原子扣库存，DB 层兜底校验
-- **订单超时**：5 分钟未支付自动取消，定时任务 30s 扫描兜底
-- **支付**：可扩展网关接口，内置 Mock 实现，支付成功后生成票券
+- **演出管理**：演出 / 场次 / 座位 CRUD；管理端一键预热座位库存到 Redis
+- **抢票核心**：Lua 原子限购检查 + Redis 批量锁座（任一失败全量回滚）+ 同步建单
+- **防超卖**：Redis Set 原子扣库存，DB 层二次校验兜底
+- **订单超时**：RabbitMQ TTL + 死信队列，5 分钟精准触发取消并释放库存
+- **异步事件**：支付成功后通过 RabbitMQ Fanout 并行触发票券生成、DB 库存同步、通知（预留）
+- **注解限流**：`@RateLimit` 注解支持全局 / 用户 / IP 三维度固定窗口限流 + 黑名单拦截
+- **参数校验**：`@Valid` + 全局异常处理，统一返回友好错误信息
 - **入场核验**：支持二维码 / 票号双通道核销
 - **JWT 认证**：`@NoLogin` 注解标记免登录接口，其余默认鉴权
 
@@ -31,7 +34,7 @@
 | 后端框架 | Spring Boot | 2.7.x / JDK 11 |
 | ORM | MyBatis | 3.5.x |
 | 缓存 / 分布式锁 | Redis + Redisson | 7.x / 3.x |
-| 消息队列 | Redis Stream | — |
+| 消息队列 | RabbitMQ | 3.x |
 | 数据库 | MySQL | 8.x |
 | 鉴权 | Spring Security + JJWT | 0.12.x |
 | 构建 | Maven | — |
@@ -42,11 +45,11 @@
 
 ```
 maill-backend/
-├── common/      # 通用工具：响应封装、异常处理、雪花ID、RedisKeys
-├── core/        # 核心业务：实体、Mapper、Service、消费者
+├── common/      # 通用工具：响应封装、异常、雪花ID、RedisKeys、@RateLimit 注解 + AOP、黑名单
+├── core/        # 核心业务：实体、Mapper、Service、MQ Producer/Consumer
 ├── admin/       # 管理端 REST API（端口 8081）
 ├── user/        # 用户端 REST API（端口 8082）
-├── payment/     # 支付模块（端口 8083）
+├── payment/     # 支付模块（端口 8083，预留）
 ├── sql/
 │   └── schema.sql
 └── docker-compose.yml
@@ -76,7 +79,9 @@ common ← core ← admin
 docker-compose up -d
 ```
 
-启动 MySQL 8（3306）和 Redis 7（6379），并自动执行 `sql/schema.sql` 建表。
+启动 MySQL 8（3306）、Redis 7（6379）、RabbitMQ 3（5672，管理界面 15672）。`sql/schema.sql` 首次运行自动执行。
+
+> **RabbitMQ 管理界面**：http://localhost:15672（guest / guest）
 
 ### 2. 编译
 
@@ -92,9 +97,6 @@ mvn spring-boot:run -pl admin
 
 # 用户端（8082）
 mvn spring-boot:run -pl user
-
-# 支付（8083）
-mvn spring-boot:run -pl payment
 ```
 
 默认使用 `dev` profile，数据库密码为 `root123`，可在各模块 `application-dev.yml` 中修改。
@@ -105,14 +107,15 @@ mvn spring-boot:run -pl payment
 
 ### 用户端（:8082）
 
-| 方法 | 路径 | 说明 | 是否需要登录 |
-|------|------|------|:---:|
+| 方法 | 路径 | 说明 | 登录 |
+|------|------|------|:----:|
 | POST | `/api/auth/register` | 注册 | ✗ |
 | POST | `/api/auth/login` | 登录，返回 JWT | ✗ |
 | GET  | `/api/show/list` | 上架演出列表 | ✗ |
 | GET  | `/api/show/{id}/sessions` | 场次列表 | ✗ |
-| GET  | `/api/show/session/{id}/seats` | 可售座位（Redis） | ✗ |
-| POST | `/api/order/submit` | 提交购票，写入 Redis Stream | ✓ |
+| GET  | `/api/show/session/{id}/seats` | 可售座位图（含实时状态） | ✗ |
+| POST | `/api/order/submit` | 锁座 + 建单，直接返回完整订单 | ✓ |
+| GET  | `/api/order/list` | 我的订单（支持日期范围筛选、分页） | ✓ |
 | POST | `/api/payment/create` | 支付订单 | ✓ |
 | GET  | `/api/verify/qr/{qrCode}` | 二维码核验 | ✗ |
 | GET  | `/api/verify/ticket/{ticketNo}` | 票号核验 | ✗ |
@@ -122,13 +125,78 @@ mvn spring-boot:run -pl payment
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/admin/show/create` | 创建演出 |
+| PUT  | `/api/admin/show/update` | 更新演出 |
 | POST | `/api/admin/session/create` | 创建场次 |
+| PUT  | `/api/admin/session/{id}/publish` | 发布场次开售 |
 | POST | `/api/admin/seat/batch` | 批量创建座位 |
+| POST | `/api/admin/seat/area/save` | 保存价格区域 |
 | POST | `/api/admin/seat/warmup/{sessionId}` | 预热座位库存到 Redis |
 | GET  | `/api/admin/order/{id}` | 查询订单 |
 | GET  | `/api/admin/monitor/dashboard` | 实时可售座位数 |
 
-完整的端到端调用示例见 [`docs/e2e-verify.http`](docs/e2e-verify.http)（IntelliJ / VS Code REST Client 格式）。
+---
+
+## 核心购票流程
+
+```
+用户选座后提交
+    │
+    ├─ @RateLimit 黑名单 / IP / 用户 / 全局限流（AOP，最先拦截）
+    ├─ 场次校验
+    ├─ Lua 原子限购检查（Redis）
+    ├─ Lua 批量锁座（任一失败全量回滚）
+    ├─ 同步建单（DB INSERT）
+    ├─ 发送超时消息到 RabbitMQ（TTL = 5 分钟）
+    └─ 直接返回完整订单信息（含演出/场次/座位/总价/倒计时）
+                │
+    ┌───────────┴───────────┐
+    │                       │
+用户在确认页点击支付      5 分钟内未支付
+    │                       │
+POST /payment/create     超时消息经死信路由
+    │                  到 order.cancel.queue
+    ├─ 创建支付记录         │
+    ├─ 订单状态改为已支付   取消订单
+    └─ 发送支付成功事件     释放 Redis 库存
+              │             回滚限购计数
+    ┌─────────┼──────────┐
+    │         │          │
+生成票券   同步DB库存   发送通知
+（异步）   （异步）    （预留）
+```
+
+---
+
+## 消息队列设计
+
+```
+订单超时（TTL + 死信）：
+  order.timeout.exchange ──→ order.timeout.queue（TTL 5分钟）
+                                      │ 到期
+  order.dead.exchange    ──→ order.cancel.queue ──→ OrderTimeoutConsumer（取消订单）
+
+支付成功（Fanout）：
+  payment.success.exchange ──→ ticket.generate.queue  ──→ 生成票券
+                           ──→ inventory.sync.queue   ──→ 同步 seat.status = 已售
+                           ──→ notification.queue     ──→ 通知（预留）
+```
+
+---
+
+## 注解限流
+
+在任意 Controller 方法上叠加 `@RateLimit` 注解，AOP 自动拦截，无需侵入业务代码：
+
+```java
+@RateLimit(type = LimitType.BLACKLIST)                                       // 黑名单检查
+@RateLimit(type = LimitType.IP,     limit = 20,  window = 60)               // IP：60秒内20次
+@RateLimit(type = LimitType.USER,   limit = 5,   window = 60)               // 用户：60秒内5次
+@RateLimit(type = LimitType.GLOBAL, limit = 50,  window = 1,  message = "系统繁忙") // 全局：每秒50次
+@PostMapping("/submit")
+public Result<?> submit(...) { }
+```
+
+**检查顺序**：黑名单 → IP 限流 → 用户限流 → 全局限流，越早拦截越轻量。
 
 ---
 
@@ -142,13 +210,11 @@ mvn spring-boot:run -pl payment
 | `user_role` | 用户角色（USER / ADMIN） |
 | `show` | 演出 |
 | `show_session` | 场次，含限购数 `limit_per_user` |
-| `seat` | 座位底表，仅做持久记录，实时库存由 Redis 管理 |
-| `order` | 订单，索引 `idx_status_expire` 供超时扫描 |
+| `seat` | 座位底表，实时库存由 Redis 管理，支付后异步同步 status |
+| `order` | 订单，索引 `idx_status_expire` |
 | `order_item` | 订单行，含价格快照 |
 | `payment` | 支付记录 |
-| `ticket` | 票券，含 8 位友好票号（排除 O/0/I/1）和 UUID 二维码 |
-
-> **库存权威**：`session:seats:{sessionId}`（Redis Set）是唯一库存来源。`seat.status` 仅在支付成功后异步更新，用于历史追溯，不参与实时库存判断。
+| `ticket` | 票券，8 位友好票号（排除 O/0/I/1）+ UUID 二维码 |
 
 ---
 
@@ -157,12 +223,40 @@ mvn spring-boot:run -pl payment
 | Key | 类型 | 说明 | TTL |
 |-----|------|------|-----|
 | `session:seats:{sessionId}` | Set | 可售座位 ID 集合 | 7 天 |
-| `seat:info:{seatId}` | Hash | 座位详情（行/列/类型/价格） | 7 天 |
+| `seat:info:{seatId}` | Hash | 座位详情（行/列/类型/区域） | 7 天 |
 | `seat:lock:{sessionId}:{seatId}` | String | 座位锁（value = userId） | 5 分钟 |
 | `session:purchase:{sessionId}:{userId}` | String | 用户已购数量 | 7 天 |
-| `ticket:order:stream` | Stream | 购票请求队列 | — |
+| `session:area:price:{sessionId}:{areaId}` | Hash | 区域价格缓存 | 7 天 |
+| `rate:global:{method}:{window}` | String | 全局限流计数 | 动态 |
+| `rate:user:{userId}:{method}:{window}` | String | 用户限流计数 | 动态 |
+| `rate:ip:{ip}:{method}:{window}` | String | IP 限流计数 | 动态 |
+| `blacklist:user:{userId}` | String | 用户黑名单 | 自定义 |
+| `blacklist:ip:{ip}` | String | IP 黑名单 | 自定义 |
 
-关键操作均通过 **Lua 脚本**保证原子性：限购检查（INCR + 边界检查）、批量锁座（SETNX 失败全量回滚）、释放座位（DEL lock + SADD 回集合）。
+---
+
+## 高并发设计要点
+
+| 问题 | 方案 |
+|------|------|
+| 超卖 | Redis Set `SREM` 原子扣库存 + DB 层二次校验兜底 |
+| 限购 | Lua 脚本原子 INCR + 阈值检查 |
+| 流量削峰 | `@RateLimit` 注解限流，全局 / 用户 / IP 三维度 |
+| 批量锁座 | Lua 脚本，任一失败全量回滚，不留半锁 |
+| 订单超时 | RabbitMQ TTL + 死信队列，精准 5 分钟触发 |
+| 支付后解耦 | RabbitMQ Fanout，票券 / 库存 / 通知并行异步处理 |
+| 黑名单 | Redis key 存储，AOP 最先检查，不消耗限流计数 |
+
+---
+
+## 安全
+
+- 密码：BCrypt 存储
+- 认证：JWT（30 分钟过期），`@NoLogin` 注解标记公开接口
+- 越权防护：订单接口校验 `order.userId == 当前登录用户`
+- 防注入：MyBatis `#{}` 参数化查询
+- 金额校验：后端重新计算总价，不信任前端传值
+- 参数校验：`@Valid` + `GlobalExceptionHandler` 统一处理
 
 ---
 
@@ -178,7 +272,6 @@ mvn spring-boot:run -pl payment
                   │                         │
          ┌────────▼────────┐      ┌────────▼────────┐
          │  admin : 8081   │      │  user  : 8082   │
-         │   Spring Boot   │      │   Spring Boot   │
          │    管理端 API    │      │    用户端 API    │
          └────────┬────────┘      └────────┬────────┘
                   │                         │
@@ -187,84 +280,20 @@ mvn spring-boot:run -pl payment
             ┌──────────────────┼──────────────────┐
             │                  │                  │
    ┌────────▼────────┐ ┌───────▼──────┐ ┌────────▼────────┐
-   │    MySQL 8      │ │   Redis 7    │ │  Redis Stream   │
-   │   (主从可选)     │ │  (缓存/锁)   │ │   (消息队列)    │
+   │    MySQL 8      │ │   Redis 7    │ │   RabbitMQ 3    │
+   │   (主从可选)     │ │  (缓存/锁)   │ │  (事件 / 超时)  │
    └─────────────────┘ └──────────────┘ └─────────────────┘
 ```
-
-- **单机**：所有组件同一台机器，docker-compose 一键启动
-- **扩展**：Nginx 负载多个 user 实例；MySQL 主从；Redis 哨兵/Sentinel
-
----
-
-## 核心购票流程
-
-```
-用户提交购票
-    │
-    ├─ Lua 限购检查（Redis）
-    │
-    ├─ 写入 Redis Stream
-    │
-    └─ 返回 requestId + "QUEUED"
-                │
-        TicketOrderConsumer 消费
-                │
-        ├─ Lua 批量锁座（任一失败全量回滚）
-        ├─ DB 超卖兜底校验
-        ├─ 创建 Order（status=0，5 分钟过期）
-        └─ 创建 OrderItem
-                │
-        ┌───────┴───────┐
-        │               │
-    用户支付         5 分钟超时
-        │               │
-    status=1        定时任务取消
-    生成 Ticket     释放 Redis 库存
-```
-
----
-
-## 高并发设计要点
-
-| 问题 | 方案 |
-|------|------|
-| 超卖 | Redis Set `SREM` 原子扣库存 + DB 层兜底 |
-| 限购 | Lua 脚本原子 INCR + 阈值检查 |
-| 削峰 | Redis Stream 队列 + 后台消费者 |
-| 锁粒度 | 单座直接锁 `seat:lock`；连座 Lua 批量操作，任一失败全回滚 |
-| 超时释放 | 定时任务 30s 扫描 `idx_status_expire` 索引，兜底释放 |
-
----
-
-## 安全
-
-- 密码：BCrypt 存储
-- 认证：JWT（30 分钟过期），`@NoLogin` 注解标记公开接口
-- 防注入：MyBatis `#{}` 参数化查询
-- 金额校验：后端重新计算总价，不信任前端传值
 
 ---
 
 ## 扩展方向
 
 - **真实支付**：实现 `PaymentGateway` 接口对接支付宝 / 微信
+- **通知服务**：接入短信 / 推送，实现 `notification.queue` 消费者
 - **微服务化**：admin / user / payment 拆分独立部署 + API Gateway
-- **更大规模 MQ**：Redis Stream → RocketMQ / RabbitMQ
 - **分库分表**：订单表按 `session_id` 分片
 - **CDN**：演出海报等静态资源加速
-
----
-
-## 压测目标
-
-| 指标 | 目标值 |
-|------|--------|
-| 查询接口 P99 | < 500ms |
-| 下单 P99（MQ 削峰后） | < 2s |
-| 座位锁定 QPS（Redis 层） | 1000+ |
-| 单机并发用户 | 5000+ |
-| 万座预热耗时 | < 3s |
 
 ---
 

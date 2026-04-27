@@ -4,15 +4,20 @@ import com.ticket.common.exception.BusinessException;
 import com.ticket.common.exception.ErrorCode;
 import com.ticket.common.util.SnowflakeIdGenerator;
 import com.ticket.core.domain.dto.OrderCreateRequest;
+import com.ticket.core.domain.dto.OrderStatusResponse;
 import com.ticket.core.domain.entity.Order;
 import com.ticket.core.domain.entity.OrderItem;
 import com.ticket.core.domain.entity.Seat;
+import com.ticket.core.domain.entity.Show;
+import com.ticket.core.domain.entity.ShowSession;
 import com.ticket.core.mapper.OrderItemMapper;
 import com.ticket.core.mapper.OrderMapper;
 import com.ticket.core.mapper.SeatMapper;
+import com.ticket.core.mapper.ShowMapper;
+import com.ticket.core.mapper.ShowSessionMapper;
+import com.ticket.core.mq.producer.OrderTimeoutProducer;
 import org.springframework.stereotype.Service;
 
-import com.ticket.core.domain.dto.OrderStatusResponse;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -33,18 +38,27 @@ public class OrderService {
     private final SeatInventoryService inventoryService;
     private final PurchaseLimitService purchaseLimitService;
     private final SeatMapper seatMapper;
+    private final ShowMapper showMapper;
+    private final ShowSessionMapper showSessionMapper;
+    private final OrderTimeoutProducer orderTimeoutProducer;
     private final SnowflakeIdGenerator snowflake = new SnowflakeIdGenerator(1, 1);
 
     public OrderService(OrderMapper orderMapper,
                         OrderItemMapper orderItemMapper,
                         SeatInventoryService inventoryService,
                         PurchaseLimitService purchaseLimitService,
-                        SeatMapper seatMapper) {
+                        SeatMapper seatMapper,
+                        ShowMapper showMapper,
+                        ShowSessionMapper showSessionMapper,
+                        OrderTimeoutProducer orderTimeoutProducer) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.inventoryService = inventoryService;
         this.purchaseLimitService = purchaseLimitService;
         this.seatMapper = seatMapper;
+        this.showMapper = showMapper;
+        this.showSessionMapper = showSessionMapper;
+        this.orderTimeoutProducer = orderTimeoutProducer;
     }
 
     /**
@@ -129,6 +143,7 @@ public class OrderService {
         order.setUpdateTime(LocalDateTime.now());
 
         orderMapper.insert(order);
+        orderTimeoutProducer.sendTimeoutMessage(order.getId());
 
         // 5. 批量插入 OrderItem
         for (OrderItem item : items) {
@@ -203,28 +218,41 @@ public class OrderService {
      * @param size   每页条数
      * @return 订单响应列表
      */
-    public List<OrderStatusResponse> getUserOrders(Long userId, int page, int size) {
+    public List<OrderStatusResponse> getUserOrders(Long userId, int page, int size,
+                                                   LocalDateTime startTime, LocalDateTime endTime) {
         int offset = (page - 1) * size;
-        List<Order> orders = orderMapper.selectByUserId(userId, offset, size);
-
-        return orders.stream().map(order -> {
-            List<OrderItem> items = orderItemMapper.selectByOrderId(order.getId());
-            OrderStatusResponse resp = new OrderStatusResponse();
-            resp.setOrderNo(order.getOrderNo());
-            resp.setStatus(order.getStatus());
-            resp.setTotalAmount(order.getTotalAmount());
-            resp.setCreateTime(order.getCreateTime());
-            resp.setPayTime(order.getPayTime());
-            resp.setExpireTime(order.getExpireTime());
-            resp.setSeatInfos(items.stream().map(OrderItem::getSeatInfo).collect(Collectors.toList()));
-            return resp;
-        }).collect(Collectors.toList());
+        List<Order> orders = orderMapper.selectByUserId(userId, offset, size, startTime, endTime);
+        return orders.stream().map(this::buildStatusResponse).collect(Collectors.toList());
     }
 
     /**
      * 统计用户订单总数
      */
-    public int countUserOrders(Long userId) {
-        return orderMapper.countByUserId(userId);
+    public int countUserOrders(Long userId, LocalDateTime startTime, LocalDateTime endTime) {
+        return orderMapper.countByUserId(userId, startTime, endTime);
+    }
+
+    public OrderStatusResponse buildStatusResponse(Order order) {
+        List<OrderItem> items = orderItemMapper.selectByOrderId(order.getId());
+        ShowSession session = showSessionMapper.selectById(order.getSessionId());
+        Show show = session != null ? showMapper.selectById(session.getShowId()) : null;
+
+        OrderStatusResponse resp = new OrderStatusResponse();
+        resp.setOrderNo(order.getOrderNo());
+        resp.setStatus(order.getStatus());
+        resp.setTotalAmount(order.getTotalAmount());
+        resp.setCreateTime(order.getCreateTime());
+        resp.setPayTime(order.getPayTime());
+        resp.setExpireTime(order.getExpireTime());
+        resp.setSeatInfos(items.stream().map(OrderItem::getSeatInfo).collect(Collectors.toList()));
+        if (show != null) {
+            resp.setShowName(show.getName());
+            resp.setShowVenue(show.getVenue());
+        }
+        if (session != null) {
+            resp.setSessionName(session.getName());
+            resp.setSessionStartTime(session.getStartTime());
+        }
+        return resp;
     }
 }
