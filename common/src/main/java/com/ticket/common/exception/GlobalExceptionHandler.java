@@ -3,6 +3,7 @@ package com.ticket.common.exception;
 import com.ticket.common.result.Result;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -28,6 +29,11 @@ public class GlobalExceptionHandler {
                 .map(FieldError::getDefaultMessage)
                 .collect(Collectors.joining(", "));
         return Result.fail(ErrorCode.PARAM_ERROR.getCode(), message);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public Result<?> handleNotReadable(HttpMessageNotReadableException e) {
+        return Result.fail(ErrorCode.PARAM_ERROR.getCode(), "请求体不能为空，请检查 Content-Type 是否为 application/json");
     }
 
     @ExceptionHandler(BusinessException.class)

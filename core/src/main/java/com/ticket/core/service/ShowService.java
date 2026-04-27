@@ -15,6 +15,7 @@ import com.ticket.core.mapper.ShowMapper;
 import com.ticket.core.mapper.ShowSessionMapper;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -52,7 +53,10 @@ public class ShowService {
      * 设置 status=1，调用 mapper.insert，返回 show
      */
     public Show createShow(Show show) {
+        LocalDateTime now = LocalDateTime.now();
         show.setStatus(1);
+        show.setCreateTime(now);
+        show.setUpdateTime(now);
         showMapper.insert(show);
         return show;
     }
@@ -89,7 +93,10 @@ public class ShowService {
      * 设置 status=0，insert，返回 session
      */
     public ShowSession createSession(ShowSession showSession) {
+        LocalDateTime now = LocalDateTime.now();
         showSession.setStatus(0);
+        showSession.setCreateTime(now);
+        showSession.setUpdateTime(now);
         showSessionMapper.insert(showSession);
         return showSession;
     }

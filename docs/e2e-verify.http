@@ -14,7 +14,7 @@
 @userHost  = http://localhost:8082
 
 # 登录后将 token 填到这里
-@token = <登录后替换>
+@token = eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiI3MDM4OTU1MzUyODcyNzU1MjAiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiaWF0IjoxNzc3MjgwOTczLCJleHAiOjE3NzcyODI3NzN9.GqDIb9TXKtb2JO8hvm7tXVKaitsR1MW93I82u6g1NRDjxrq5Sh2xNhAMzcu-4sVq
 
 # 后续步骤自动依赖的 ID（从响应中取，手动填入）
 @showId    = 1

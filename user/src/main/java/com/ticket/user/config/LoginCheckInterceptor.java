@@ -2,6 +2,7 @@ package com.ticket.user.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ticket.common.result.Result;
+import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -33,9 +34,9 @@ public class LoginCheckInterceptor implements HandlerInterceptor {
             return true;
         }
         HandlerMethod method = (HandlerMethod) handler;
-        // 方法或类上有 @NoLogin 则直接放行
+        // 方法或类上有 @NoLogin 则直接放行（用 AnnotationUtils 正确处理 CGLIB 代理类）
         if (method.hasMethodAnnotation(NoLogin.class)
-                || method.getBeanType().isAnnotationPresent(NoLogin.class)) {
+                || AnnotationUtils.findAnnotation(method.getBeanType(), NoLogin.class) != null) {
             return true;
         }
         // 检查是否已通过 JWT 过滤器写入有效认证

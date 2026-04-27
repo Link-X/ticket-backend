@@ -5,6 +5,7 @@ import com.ticket.common.annotation.RateLimit;
 import com.ticket.common.exception.BusinessException;
 import com.ticket.common.exception.ErrorCode;
 import com.ticket.common.result.Result;
+import com.ticket.common.util.SnowflakeIdGenerator;
 import com.ticket.core.domain.entity.User;
 import com.ticket.core.domain.entity.UserRole;
 import com.ticket.core.mapper.UserMapper;
@@ -17,12 +18,15 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 @NoLogin
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
+
+    private final SnowflakeIdGenerator snowflake = new SnowflakeIdGenerator(1, 4);
 
     private final UserMapper userMapper;
     private final UserRoleMapper userRoleMapper;
@@ -47,12 +51,16 @@ public class AuthController {
         if (userMapper.selectByUsername(req.getUsername()) != null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "用户名已存在");
         }
+        LocalDateTime now = LocalDateTime.now();
         User user = new User();
+        user.setId(snowflake.nextId());
         user.setUsername(req.getUsername());
         user.setPasswordHash(passwordEncoder.encode(req.getPassword()));
         user.setPhone(req.getPhone());
         user.setEmail(req.getEmail());
         user.setStatus(1);
+        user.setCreateTime(now);
+        user.setUpdateTime(now);
         userMapper.insert(user);
 
         UserRole role = new UserRole();

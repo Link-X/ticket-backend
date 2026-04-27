@@ -7,7 +7,7 @@ USE ticket_system;
 
 -- 1. 用户表
 -- `user` 是 MySQL 保留字，必须使用反引号
-CREATE TABLE `user` (
+CREATE TABLE IF NOT EXISTS `user` (
     id BIGINT NOT NULL COMMENT '用户ID(雪花ID)',
     username VARCHAR(64) NOT NULL COMMENT '用户名',
     phone VARCHAR(20) DEFAULT NULL COMMENT '手机号',
@@ -21,7 +21,7 @@ CREATE TABLE `user` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
 
 -- 2. 用户角色表
-CREATE TABLE user_role (
+CREATE TABLE IF NOT EXISTS user_role (
     id BIGINT NOT NULL AUTO_INCREMENT,
     user_id BIGINT NOT NULL COMMENT '用户ID',
     role VARCHAR(32) NOT NULL COMMENT '角色: ADMIN, USER',
@@ -31,7 +31,7 @@ CREATE TABLE user_role (
 
 -- 3. 演出表
 -- `show` 是 MySQL 保留字，必须使用反引号
-CREATE TABLE `show` (
+CREATE TABLE IF NOT EXISTS `show` (
     id BIGINT NOT NULL AUTO_INCREMENT,
     name VARCHAR(128) NOT NULL COMMENT '演出名称',
     description TEXT COMMENT '演出描述',
@@ -45,31 +45,35 @@ CREATE TABLE `show` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='演出表';
 
 -- 4. 演出场次表
-CREATE TABLE show_session (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    show_id BIGINT NOT NULL COMMENT '关联演出ID',
-    name VARCHAR(128) NOT NULL COMMENT '场次名称',
-    start_time DATETIME NOT NULL COMMENT '开始时间',
-    end_time DATETIME NOT NULL COMMENT '结束时间',
-    total_seats INT NOT NULL DEFAULT 0 COMMENT '总座位数',
-    limit_per_user INT NOT NULL DEFAULT 1 COMMENT '每用户限购数量',
-    status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=未开放, 1=销售中, 2=已结束, 3=已预热',
-    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS show_session (
+    id             BIGINT       NOT NULL AUTO_INCREMENT,
+    show_id        BIGINT       NOT NULL COMMENT '关联演出ID',
+    name           VARCHAR(128) NOT NULL COMMENT '场次名称',
+    start_time     DATETIME     NOT NULL COMMENT '开始时间',
+    end_time       DATETIME     NOT NULL COMMENT '结束时间',
+    total_seats    INT          NOT NULL DEFAULT 0 COMMENT '总座位数',
+    limit_per_user INT          NOT NULL DEFAULT 1 COMMENT '每用户限购数量',
+    status         INT          NOT NULL DEFAULT 0 COMMENT '状态: 0=未开放, 1=销售中, 2=已结束, 3=已预热',
+    row_count      INT          NOT NULL DEFAULT 0 COMMENT '座位网格行数',
+    col_count      INT          NOT NULL DEFAULT 0 COMMENT '座位网格列数',
+    create_time    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_show_id (show_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='演出场次表';
 
 -- 5. 座位表
-CREATE TABLE seat (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    session_id BIGINT NOT NULL COMMENT '关联场次ID',
-    row_no INT NOT NULL COMMENT '排号',
-    col_no INT NOT NULL COMMENT '列号',
-    seat_type VARCHAR(32) DEFAULT 'NORMAL' COMMENT '座位类型: NORMAL, VIP, VVIP',
-    price DECIMAL(10,2) NOT NULL COMMENT '票价',
-    status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=可售, 1=已锁定, 2=已售, 3=不可售',
-    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS seat (
+    id           BIGINT      NOT NULL AUTO_INCREMENT,
+    session_id   BIGINT      NOT NULL COMMENT '关联场次ID',
+    row_no       INT         NOT NULL COMMENT '排号',
+    col_no       INT         NOT NULL COMMENT '列号',
+    type         INT         NOT NULL DEFAULT 1  COMMENT '座位类型: 1=普通, 2=情侣左, 3=情侣右',
+    area_id      VARCHAR(32) NOT NULL DEFAULT '' COMMENT '价格区域ID，对应 seat_area.area_id',
+    seat_name    VARCHAR(64)          DEFAULT NULL COMMENT '座位名称，如 1排01座',
+    pair_seat_id BIGINT               DEFAULT NULL COMMENT '情侣连座配对座位ID，type=2/3时非空',
+    status       INT         NOT NULL DEFAULT 0  COMMENT '状态: 0=可售, 1=已锁定, 2=已售',
+    create_time  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_session_id (session_id),
     KEY idx_session_status (session_id, status)
@@ -77,7 +81,7 @@ CREATE TABLE seat (
 
 -- 6. 订单表
 -- `order` 是 MySQL 保留字，必须使用反引号
-CREATE TABLE `order` (
+CREATE TABLE IF NOT EXISTS `order` (
     id BIGINT NOT NULL AUTO_INCREMENT,
     order_no VARCHAR(32) NOT NULL COMMENT '订单编号(雪花ID)',
     user_id BIGINT NOT NULL COMMENT '用户ID',
@@ -97,7 +101,7 @@ CREATE TABLE `order` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单表';
 
 -- 7. 订单明细表
-CREATE TABLE order_item (
+CREATE TABLE IF NOT EXISTS order_item (
     id BIGINT NOT NULL AUTO_INCREMENT,
     order_id BIGINT NOT NULL COMMENT '关联订单ID',
     seat_id BIGINT NOT NULL COMMENT '座位ID',
@@ -110,7 +114,7 @@ CREATE TABLE order_item (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单明细表';
 
 -- 8. 支付表
-CREATE TABLE payment (
+CREATE TABLE IF NOT EXISTS payment (
     id BIGINT NOT NULL AUTO_INCREMENT,
     order_id BIGINT NOT NULL COMMENT '关联订单ID',
     payment_no VARCHAR(64) NOT NULL COMMENT '支付流水号',
@@ -128,7 +132,7 @@ CREATE TABLE payment (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付表';
 
 -- 9. 票据表
-CREATE TABLE ticket (
+CREATE TABLE IF NOT EXISTS ticket (
     id BIGINT NOT NULL AUTO_INCREMENT,
     order_id BIGINT NOT NULL COMMENT '关联订单ID',
     user_id BIGINT NOT NULL COMMENT '用户ID',
@@ -145,10 +149,8 @@ CREATE TABLE ticket (
     KEY idx_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='票据表';
 
--- ===== 座位区域化重构变更 =====
-
--- 新增：座位价格区域表
-CREATE TABLE seat_area (
+-- 10. 座位价格区域表
+CREATE TABLE IF NOT EXISTS seat_area (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
     session_id  BIGINT       NOT NULL COMMENT '关联场次ID',
     area_id     VARCHAR(32)  NOT NULL COMMENT '区域标识(如 0、1，场次内唯一)',
@@ -159,16 +161,3 @@ CREATE TABLE seat_area (
     KEY idx_session_id (session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='座位价格区域表';
 
--- 修改 show_session：新增网格尺寸字段
-ALTER TABLE show_session
-    ADD COLUMN row_count INT NOT NULL DEFAULT 0 COMMENT '座位网格行数',
-    ADD COLUMN col_count INT NOT NULL DEFAULT 0 COMMENT '座位网格列数';
-
--- 修改 seat：去掉 seat_type/price，改用 type/area_id/seat_name/pair_seat_id
-ALTER TABLE seat
-    DROP COLUMN seat_type,
-    DROP COLUMN price,
-    ADD COLUMN type         INT          NOT NULL DEFAULT 1  COMMENT '座位类型: 1=普通, 2=情侣左, 3=情侣右',
-    ADD COLUMN area_id      VARCHAR(32)  NOT NULL DEFAULT '' COMMENT '价格区域ID，对应 seat_area.area_id',
-    ADD COLUMN seat_name    VARCHAR(64)  DEFAULT NULL        COMMENT '座位名称，如 1排01座',
-    ADD COLUMN pair_seat_id BIGINT       DEFAULT NULL        COMMENT '情侣连座配对座位ID，type=2/3时非空';
