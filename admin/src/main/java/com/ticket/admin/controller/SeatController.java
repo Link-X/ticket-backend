@@ -1,14 +1,16 @@
 package com.ticket.admin.controller;
 
+import com.ticket.admin.dto.BatchCreateSeatRequest;
+import com.ticket.admin.dto.SaveAreasRequest;
 import com.ticket.common.result.Result;
 import com.ticket.core.domain.entity.Seat;
 import com.ticket.core.domain.entity.SeatArea;
 import com.ticket.core.mapper.SeatMapper;
 import com.ticket.core.service.SeatAreaService;
 import com.ticket.core.service.SeatInventoryService;
-import lombok.Data;
 import org.springframework.web.bind.annotation.*;
 
+import javax.validation.Valid;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -33,7 +35,7 @@ public class SeatController {
      * seats 中每个元素需提供: rowNo, colNo, type, areaId, seatName, pairSeatId(情侣座才填)
      */
     @PostMapping("/batch")
-    public Result<?> batchCreateSeats(@RequestBody BatchCreateRequest req) {
+    public Result<?> batchCreateSeats(@Valid @RequestBody BatchCreateSeatRequest req) {
         List<Seat> seats = req.getSeats();
         LocalDateTime now = LocalDateTime.now();
         seats.forEach(s -> {
@@ -57,7 +59,7 @@ public class SeatController {
      * 保存/覆盖场次价格区域
      */
     @PostMapping("/area/save")
-    public Result<?> saveAreas(@RequestBody SaveAreasRequest req) {
+    public Result<?> saveAreas(@Valid @RequestBody SaveAreasRequest req) {
         List<SeatArea> areas = req.getAreas();
         areas.forEach(a -> a.setSessionId(req.getSessionId()));
         seatAreaService.saveAreas(req.getSessionId(), areas);
@@ -87,17 +89,5 @@ public class SeatController {
         }
         inventoryService.warmup(sessionId, seats, areas);
         return Result.success("预热完成，共 " + seats.size() + " 个座位，" + areas.size() + " 个价格区域");
-    }
-
-    @Data
-    public static class BatchCreateRequest {
-        private Long sessionId;
-        private List<Seat> seats;
-    }
-
-    @Data
-    public static class SaveAreasRequest {
-        private Long sessionId;
-        private List<SeatArea> areas;
     }
 }

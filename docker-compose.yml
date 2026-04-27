@@ -22,15 +22,29 @@ services:
     restart: unless-stopped
 
   redis:
-     image: redis:7-alpine
-     container_name: ticket-redis
-     ports:
-       - "6379:6379"
-     volumes:
-       - redis-data:/data
-     command: redis-server --appendonly yes
+    image: redis:7-alpine
+    container_name: ticket-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: ticket-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    restart: unless-stopped
 
 volumes:
   mysql-data:
   redis-data:
+  rabbitmq-data:

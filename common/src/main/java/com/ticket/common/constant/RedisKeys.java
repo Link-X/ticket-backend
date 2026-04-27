@@ -54,4 +54,29 @@ public class RedisKeys {
     public static String orderRequest(String requestId) {
         return "order:request:" + requestId;
     }
+
+    /** 场次抢票限流计数（固定窗口，key 含秒级时间戳） */
+    public static String submitRateLimit(long sessionId, long windowSecond) {
+        return "rate:submit:" + sessionId + ":" + windowSecond;
+    }
+
+    public static String rateLimitGlobal(String methodKey, long windowSecond) {
+        return "rate:global:" + methodKey + ":" + windowSecond;
+    }
+
+    public static String rateLimitUser(long userId, String methodKey, long windowSecond) {
+        return "rate:user:" + userId + ":" + methodKey + ":" + windowSecond;
+    }
+
+    public static String rateLimitIp(String ip, String methodKey, long windowSecond) {
+        return "rate:ip:" + ip + ":" + methodKey + ":" + windowSecond;
+    }
+
+    public static String blacklistUser(long userId) {
+        return "blacklist:user:" + userId;
+    }
+
+    public static String blacklistIp(String ip) {
+        return "blacklist:ip:" + ip;
+    }
 }

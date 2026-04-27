@@ -4,21 +4,24 @@
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.x-brightgreen)
 ![MySQL](https://img.shields.io/badge/MySQL-8.x-orange)
 ![Redis](https://img.shields.io/badge/Redis-7.x-red)
+![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.x-ff6600)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 [中文文档](README.zh.md)
 
-A high-concurrency ticket booking backend supporting thousands to tens of thousands of concurrent users. Features show management, seat selection, Redis-based inventory, order timeout cancellation, mock payment, and venue check-in verification. Built with a Maven multi-module architecture for independent deployment.
+A high-concurrency ticket booking backend targeting thousands to tens of thousands of concurrent users. Features show management, seat selection, Redis-based inventory, order timeout cancellation, mock payment, and venue check-in verification. Built with a Maven multi-module architecture for independent deployment.
 
 ---
 
 ## Features
 
-- **Show Management** — CRUD for shows / sessions / seats; admin warms up seat inventory into Redis
-- **Ticket Booking Core** — Lua atomic purchase-limit check + Redis Stream queue buffering + async order consumer
-- **Oversell Prevention** — Redis Set atomic deduction + DB-level safety check
-- **Order Timeout** — Auto-cancel after 5 minutes; scheduled job scans every 30s as a fallback
-- **Payment** — Extensible `PaymentGateway` interface with built-in Mock implementation; generates tickets on success
+- **Show Management** — CRUD for shows / sessions / seats; admin warms up seat inventory into Redis with one click
+- **Booking Core** — Lua atomic purchase-limit check + Redis batch seat lock (full rollback on any failure) + synchronous order creation
+- **Oversell Prevention** — Redis Set atomic `SREM` deduction + DB-level safety check
+- **Order Timeout** — RabbitMQ TTL + dead-letter queue, cancels order and releases inventory exactly 5 minutes after creation
+- **Async Events** — After payment, RabbitMQ Fanout fan-out triggers ticket generation, DB inventory sync, and notification (reserved) in parallel
+- **Annotation Rate Limiting** — `@RateLimit` annotation supports GLOBAL / USER / IP three-dimensional fixed-window rate limiting + blacklist interception
+- **Parameter Validation** — `@Valid` + global exception handler returns unified friendly error messages
 - **Check-in Verification** — Dual-channel: QR code or ticket number
 - **JWT Auth** — `@NoLogin` annotation marks public endpoints; all others require authentication by default
 
@@ -31,7 +34,7 @@ A high-concurrency ticket booking backend supporting thousands to tens of thousa
 | Framework | Spring Boot | 2.7.x / JDK 11 |
 | ORM | MyBatis | 3.5.x |
 | Cache / Lock | Redis + Redisson | 7.x / 3.x |
-| Message Queue | Redis Stream | — |
+| Message Queue | RabbitMQ | 3.x |
 | Database | MySQL | 8.x |
 | Auth | Spring Security + JJWT | 0.12.x |
 | Build | Maven | — |
@@ -42,11 +45,11 @@ A high-concurrency ticket booking backend supporting thousands to tens of thousa
 
 ```
 maill-backend/
-├── common/      # Utilities: response wrapper, exceptions, Snowflake ID, RedisKeys
-├── core/        # Core business: entities, Mappers, Services, consumer
+├── common/      # Utilities: response wrapper, exceptions, Snowflake ID, RedisKeys, @RateLimit annotation + AOP, blacklist
+├── core/        # Core business: entities, Mappers, Services, MQ Producer/Consumer
 ├── admin/       # Admin REST API  (port 8081)
 ├── user/        # User  REST API  (port 8082)
-├── payment/     # Payment module  (port 8083)
+├── payment/     # Payment module  (port 8083, reserved)
 ├── sql/
 │   └── schema.sql
 └── docker-compose.yml
@@ -76,7 +79,9 @@ common ← core ← admin
 docker-compose up -d
 ```
 
-Starts MySQL 8 (port 3306) and Redis 7 (port 6379). `sql/schema.sql` is executed automatically on first run.
+Starts MySQL 8 (3306), Redis 7 (6379), and RabbitMQ 3 (5672, management UI on 15672). `sql/schema.sql` is executed automatically on first run.
+
+> **RabbitMQ Management UI**: http://localhost:15672 (guest / guest)
 
 ### 2. Build
 
@@ -92,9 +97,6 @@ mvn spring-boot:run -pl admin
 
 # User service (8082)
 mvn spring-boot:run -pl user
-
-# Payment service (8083)
-mvn spring-boot:run -pl payment
 ```
 
 The default profile is `dev`. Database password is `root123`. Edit each module's `application-dev.yml` to change.
@@ -111,8 +113,9 @@ The default profile is `dev`. Database password is `root123`. Edit each module's
 | POST | `/api/auth/login` | Login, returns JWT | ✗ |
 | GET  | `/api/show/list` | List published shows | ✗ |
 | GET  | `/api/show/{id}/sessions` | List sessions | ✗ |
-| GET  | `/api/show/session/{id}/seats` | Available seats (from Redis) | ✗ |
-| POST | `/api/order/submit` | Submit booking, enqueues to Redis Stream | ✓ |
+| GET  | `/api/show/session/{id}/seats` | Available seat map (with real-time status) | ✗ |
+| POST | `/api/order/submit` | Lock seats + create order, returns full order immediately | ✓ |
+| GET  | `/api/order/list` | My orders (supports date range filter + pagination) | ✓ |
 | POST | `/api/payment/create` | Pay order | ✓ |
 | GET  | `/api/verify/qr/{qrCode}` | Verify by QR code | ✗ |
 | GET  | `/api/verify/ticket/{ticketNo}` | Verify by ticket number | ✗ |
@@ -122,13 +125,80 @@ The default profile is `dev`. Database password is `root123`. Edit each module's
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/admin/show/create` | Create show |
+| PUT  | `/api/admin/show/update` | Update show |
 | POST | `/api/admin/session/create` | Create session |
+| PUT  | `/api/admin/session/{id}/publish` | Publish session for sale |
 | POST | `/api/admin/seat/batch` | Batch create seats |
+| POST | `/api/admin/seat/area/save` | Save price area |
 | POST | `/api/admin/seat/warmup/{sessionId}` | Warm up seat inventory into Redis |
 | GET  | `/api/admin/order/{id}` | Get order |
 | GET  | `/api/admin/monitor/dashboard` | Real-time available seat count |
 
-For a full end-to-end walkthrough see [`docs/e2e-verify.http`](docs/e2e-verify.http) (IntelliJ / VS Code REST Client format).
+---
+
+## Core Booking Flow
+
+```
+User submits seat selection
+    │
+    ├─ @RateLimit blacklist / IP / user / global check (AOP, first to intercept)
+    ├─ Session validation
+    ├─ Lua atomic purchase-limit check (Redis)
+    ├─ Lua batch seat lock (full rollback on any failure)
+    ├─ Synchronous order creation (DB INSERT)
+    ├─ Send timeout message to RabbitMQ (TTL = 5 min)
+    └─ Return full order info (show / session / seats / total / countdown)
+                │
+    ┌───────────┴───────────┐
+    │                       │
+User clicks Pay on       No payment within 5 min
+  confirmation page          │
+    │                   Timeout message routed via DLX
+POST /payment/create    to order.cancel.queue
+    │                       │
+    ├─ Create payment record Cancel order
+    ├─ Order status → PAID  Release Redis inventory
+    └─ Send payment event   Roll back purchase count
+              │
+    ┌─────────┼──────────┐
+    │         │          │
+Generate   Sync DB    Send notification
+Tickets   inventory   (reserved)
+(async)    (async)
+```
+
+---
+
+## Message Queue Design
+
+```
+Order Timeout (TTL + Dead Letter):
+  order.timeout.exchange ──→ order.timeout.queue (TTL 5 min)
+                                      │ expires
+  order.dead.exchange    ──→ order.cancel.queue ──→ OrderTimeoutConsumer (cancel order)
+
+Payment Success (Fanout):
+  payment.success.exchange ──→ ticket.generate.queue  ──→ generate tickets
+                           ──→ inventory.sync.queue   ──→ sync seat.status = SOLD
+                           ──→ notification.queue     ──→ notify (reserved)
+```
+
+---
+
+## Annotation Rate Limiting
+
+Stack `@RateLimit` annotations on any Controller method — AOP intercepts automatically, no business code changes needed:
+
+```java
+@RateLimit(type = LimitType.BLACKLIST)                                       // blacklist check
+@RateLimit(type = LimitType.IP,     limit = 20,  window = 60)               // IP: 20 per 60s
+@RateLimit(type = LimitType.USER,   limit = 5,   window = 60)               // User: 5 per 60s
+@RateLimit(type = LimitType.GLOBAL, limit = 50,  window = 1,  message = "System busy") // Global: 50/s
+@PostMapping("/submit")
+public Result<?> submit(...) { }
+```
+
+**Check order**: Blacklist → IP → User → Global. Earlier checks are cheaper to evaluate.
 
 ---
 
@@ -142,13 +212,11 @@ For a full end-to-end walkthrough see [`docs/e2e-verify.http`](docs/e2e-verify.h
 | `user_role` | Roles: USER / ADMIN |
 | `show` | Shows |
 | `show_session` | Sessions, includes `limit_per_user` |
-| `seat` | Seat master table — persisted record only; real-time inventory lives in Redis |
-| `order` | Orders; index `idx_status_expire` for timeout scans |
+| `seat` | Seat master table; real-time inventory lives in Redis, `status` synced async after payment |
+| `order` | Orders; index `idx_status_expire` |
 | `order_item` | Order lines with price snapshot |
 | `payment` | Payment records |
-| `ticket` | Tickets with 8-char friendly ticket number (alphanumeric, excludes O/0/I/1) and UUID QR code |
-
-> **Inventory source of truth**: the Redis Set `session:seats:{sessionId}` is the only authoritative inventory. `seat.status` is updated asynchronously after payment for historical records only — it does not participate in real-time inventory decisions.
+| `ticket` | Tickets with 8-char friendly ticket number (excludes O/0/I/1) + UUID QR code |
 
 ---
 
@@ -157,12 +225,40 @@ For a full end-to-end walkthrough see [`docs/e2e-verify.http`](docs/e2e-verify.h
 | Key | Type | Description | TTL |
 |-----|------|-------------|-----|
 | `session:seats:{sessionId}` | Set | Available seat ID pool | 7 days |
-| `seat:info:{seatId}` | Hash | Seat details: row / col / type / price | 7 days |
+| `seat:info:{seatId}` | Hash | Seat details: row / col / type / area | 7 days |
 | `seat:lock:{sessionId}:{seatId}` | String | Seat lock (value = userId) | 5 min |
 | `session:purchase:{sessionId}:{userId}` | String | Per-user purchase count | 7 days |
-| `ticket:order:stream` | Stream | Booking request queue | — |
+| `session:area:price:{sessionId}:{areaId}` | Hash | Area price cache | 7 days |
+| `rate:global:{method}:{window}` | String | Global rate-limit counter | dynamic |
+| `rate:user:{userId}:{method}:{window}` | String | User rate-limit counter | dynamic |
+| `rate:ip:{ip}:{method}:{window}` | String | IP rate-limit counter | dynamic |
+| `blacklist:user:{userId}` | String | User blacklist | custom |
+| `blacklist:ip:{ip}` | String | IP blacklist | custom |
 
-All critical operations use **Lua scripts** for atomicity: purchase-limit check (GET + INCR), batch seat locking (SETNX with full rollback on any failure), seat release (DEL lock + SADD back to pool).
+---
+
+## Concurrency Design
+
+| Problem | Solution |
+|---------|----------|
+| Oversell | Redis Set `SREM` atomic deduction + DB safety check |
+| Purchase limit | Lua atomic INCR + threshold check |
+| Traffic spike | `@RateLimit` annotation limiting: global / user / IP three dimensions |
+| Batch seat lock | Lua script — full rollback on any failure, no partial locks |
+| Order timeout | RabbitMQ TTL + dead-letter queue, exactly 5 minutes |
+| Post-payment decoupling | RabbitMQ Fanout — ticket / inventory / notification processed async in parallel |
+| Blacklist | Redis key storage, checked by AOP first, does not consume rate-limit counters |
+
+---
+
+## Security
+
+- Passwords stored with BCrypt
+- JWT authentication (30-minute expiry); `@NoLogin` marks public endpoints
+- IDOR protection: order endpoints verify `order.userId == current user`
+- SQL injection prevention via MyBatis `#{}` parameterized queries
+- Server-side price recalculation — client-supplied amounts are never trusted
+- Parameter validation: `@Valid` + `GlobalExceptionHandler` unified error handling
 
 ---
 
@@ -178,7 +274,6 @@ All critical operations use **Lua scripts** for atomicity: purchase-limit check 
                   │                         │
          ┌────────▼────────┐      ┌────────▼────────┐
          │  admin : 8081   │      │  user  : 8082   │
-         │   Spring Boot   │      │   Spring Boot   │
          │   Admin API     │      │    User API     │
          └────────┬────────┘      └────────┬────────┘
                   │                         │
@@ -187,86 +282,21 @@ All critical operations use **Lua scripts** for atomicity: purchase-limit check 
             ┌──────────────────┼──────────────────┐
             │                  │                  │
    ┌────────▼────────┐ ┌───────▼──────┐ ┌────────▼────────┐
-   │    MySQL 8      │ │   Redis 7    │ │  Redis Stream   │
-   │  (replication   │ │ (cache/lock) │ │ (message queue) │
+   │    MySQL 8      │ │   Redis 7    │ │   RabbitMQ 3    │
+   │  (replication   │ │ (cache/lock) │ │ (events/timeout)│
    │   optional)     │ │              │ │                 │
    └─────────────────┘ └──────────────┘ └─────────────────┘
 ```
-
-- **Single machine** — all components on one host, started via docker-compose
-- **Scaled out** — Nginx load-balances multiple user instances; MySQL replication; Redis Sentinel
-
----
-
-## Core Booking Flow
-
-```
-User submits booking
-    │
-    ├─ Lua purchase-limit check (Redis)
-    │
-    ├─ Enqueue to Redis Stream
-    │
-    └─ Return requestId + "QUEUED"
-                │
-        TicketOrderConsumer picks up message
-                │
-        ├─ Lua batch seat lock (full rollback on any failure)
-        ├─ DB oversell safety check
-        ├─ Create Order (status=0, expires in 5 min)
-        └─ Create OrderItems
-                │
-        ┌───────┴────────┐
-        │                │
-    User pays        Timeout (5 min)
-        │                │
-    status=1         Scheduled job cancels
-    Generate         Releases Redis inventory
-    Tickets
-```
-
----
-
-## Concurrency Design
-
-| Problem | Solution |
-|---------|----------|
-| Oversell | Redis Set `SREM` atomic deduction + DB safety check |
-| Purchase limit | Lua atomic INCR + threshold check |
-| Traffic spike | Redis Stream queue + async consumer |
-| Lock granularity | Single seat: direct `seat:lock`; multi-seat: Lua batch with full rollback |
-| Timeout release | Scheduled job scans `idx_status_expire` index every 30s |
-
----
-
-## Security
-
-- Passwords stored with BCrypt
-- JWT authentication (30-minute expiry); `@NoLogin` marks public endpoints
-- SQL injection prevention via MyBatis `#{}` parameterized queries
-- Server-side price recalculation — client-supplied amounts are never trusted
 
 ---
 
 ## Roadmap
 
 - **Real payment gateways** — implement `PaymentGateway` for Alipay / WeChat Pay
+- **Notification service** — integrate SMS / push, implement `notification.queue` consumer
 - **Microservices** — split admin / user / payment into independent services behind an API Gateway
-- **Larger-scale MQ** — replace Redis Stream with RocketMQ / RabbitMQ at higher scale
 - **Sharding** — partition the order table by `session_id`
 - **CDN** — offload show poster and static assets
-
----
-
-## Performance Targets
-
-| Metric | Target |
-|--------|--------|
-| Query P99 latency | < 500 ms |
-| Order submit P99 (after queue buffering) | < 2 s |
-| Seat lock QPS (Redis layer) | 1,000+ |
-| Concurrent users (single node) | 5,000+ |
-| Warm-up time (10,000 seats) | < 3 s |
 
 ---
 

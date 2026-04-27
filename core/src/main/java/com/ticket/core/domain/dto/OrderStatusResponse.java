@@ -17,4 +17,9 @@ public class OrderStatusResponse {
     private LocalDateTime payTime;
     private LocalDateTime expireTime;
     private List<String> seatInfos;
+
+    private String showName;
+    private String showVenue;
+    private String sessionName;
+    private LocalDateTime sessionStartTime;
 }

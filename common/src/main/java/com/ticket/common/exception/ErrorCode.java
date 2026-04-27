@@ -22,7 +22,8 @@ public enum ErrorCode {
     ORDER_NOT_FOUND(1005, "订单不存在"),
     ORDER_EXPIRED(1006, "订单已过期"),
     SESSION_NOT_FOUND(1007, "场次不存在"),
-    SHOW_NOT_FOUND(1008, "演出不存在");
+    SHOW_NOT_FOUND(1008, "演出不存在"),
+    RATE_LIMIT_EXCEEDED(1009, "系统繁忙，请稍后重试");
 
     private final int code;
     private final String message;

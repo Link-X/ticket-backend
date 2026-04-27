@@ -1,30 +1,26 @@
 package com.ticket.user.controller;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ticket.common.constant.RedisKeys;
 import com.ticket.common.exception.BusinessException;
 import com.ticket.common.exception.ErrorCode;
 import com.ticket.common.result.Result;
 import com.ticket.core.domain.dto.OrderCreateRequest;
 import com.ticket.core.domain.dto.OrderStatusResponse;
 import com.ticket.core.domain.entity.Order;
-import com.ticket.core.domain.entity.OrderItem;
+import com.ticket.common.annotation.LimitType;
+import com.ticket.common.annotation.RateLimit;
 import com.ticket.core.service.OrderService;
 import com.ticket.core.service.PurchaseLimitService;
 import com.ticket.core.service.SeatInventoryService;
 import com.ticket.core.service.ShowService;
-import lombok.Data;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.connection.stream.RecordId;
-import org.springframework.data.redis.connection.stream.StreamRecords;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import com.ticket.user.dto.SubmitOrderRequest;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import javax.validation.Valid;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/order")
@@ -34,34 +30,27 @@ public class OrderController {
     private final PurchaseLimitService purchaseLimitService;
     private final SeatInventoryService inventoryService;
     private final OrderService orderService;
-    private final StringRedisTemplate redisTemplate;
-    private final ObjectMapper objectMapper;
 
-    /** 座位锁 TTL（秒）：覆盖队列等待 + 订单处理时间 */
     private static final long SEAT_LOCK_TTL = 300L;
-
-    @Value("${ticket.stream.key:ticket:order:stream}")
-    private String streamKey;
 
     public OrderController(ShowService showService,
                            PurchaseLimitService purchaseLimitService,
                            SeatInventoryService inventoryService,
-                           OrderService orderService,
-                           StringRedisTemplate redisTemplate,
-                           ObjectMapper objectMapper) {
+                           OrderService orderService) {
         this.showService = showService;
         this.purchaseLimitService = purchaseLimitService;
         this.inventoryService = inventoryService;
         this.orderService = orderService;
-        this.redisTemplate = redisTemplate;
-        this.objectMapper = objectMapper;
     }
 
+    @RateLimit(type = LimitType.BLACKLIST)
+    @RateLimit(type = LimitType.IP,     limit = 30,  window = 60, message = "IP 请求过于频繁，请稍后再试")
+    @RateLimit(type = LimitType.USER,   limit = 8,   window = 60, message = "操作太频繁，请稍后再试")
+    @RateLimit(type = LimitType.GLOBAL, limit = 80,  window = 1,  message = "系统繁忙，请稍后重试")
     @PostMapping("/submit")
-    public Result<Map<String, Object>> submit(@RequestBody SubmitRequest req) throws JsonProcessingException {
+    public Result<OrderStatusResponse> submit(@Valid @RequestBody SubmitOrderRequest req) {
         Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
 
-        // 限购检查
         var session = showService.getSession(req.getSessionId());
         if (session == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "场次不存在");
@@ -72,7 +61,6 @@ public class OrderController {
             throw new BusinessException(ErrorCode.EXCEED_PURCHASE_LIMIT);
         }
 
-        // 原子锁座：任一座位已被锁定则整批失败
         boolean locked = inventoryService.batchLockSeats(
                 req.getSessionId(), req.getSeatIds(), String.valueOf(userId), SEAT_LOCK_TTL);
         if (!locked) {
@@ -80,57 +68,24 @@ public class OrderController {
             throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
         }
 
-        // 构建消息并写入 Redis Stream
         OrderCreateRequest orderReq = new OrderCreateRequest();
         orderReq.setUserId(userId);
         orderReq.setSessionId(req.getSessionId());
         orderReq.setSeatIds(req.getSeatIds());
 
-        String json = objectMapper.writeValueAsString(orderReq);
-        RecordId recordId = redisTemplate.opsForStream().add(
-                StreamRecords.newRecord()
-                        .ofMap(Map.of("data", json))
-                        .withStreamKey(streamKey)
-        );
-
-        String requestId = recordId != null ? recordId.getValue() : "";
-        return Result.success(Map.of("requestId", requestId, "status", "QUEUED"));
+        Order order = orderService.createOrder(orderReq);
+        return Result.success(orderService.buildStatusResponse(order));
     }
 
     @GetMapping("/list")
     public Result<?> list(
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
         Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        List<OrderStatusResponse> orders = orderService.getUserOrders(userId, page, size);
-        int total = orderService.countUserOrders(userId);
+        List<OrderStatusResponse> orders = orderService.getUserOrders(userId, page, size, startTime, endTime);
+        int total = orderService.countUserOrders(userId, startTime, endTime);
         return Result.success(Map.of("total", total, "list", orders));
-    }
-
-    @GetMapping("/query/{requestId}")
-    public Result<?> query(@PathVariable String requestId) {
-        String orderNo = redisTemplate.opsForValue().get(RedisKeys.orderRequest(requestId));
-        if (orderNo == null) {
-            return Result.success(Map.of("requestId", requestId, "status", "QUEUED"));
-        }
-        Order order = orderService.getByOrderNo(orderNo);
-        if (order == null) {
-            return Result.success(Map.of("requestId", requestId, "status", "QUEUED"));
-        }
-        List<OrderItem> items = orderService.getOrderItems(order.getId());
-
-        OrderStatusResponse resp = new OrderStatusResponse();
-        resp.setOrderNo(order.getOrderNo());
-        resp.setStatus(order.getStatus());
-        resp.setTotalAmount(order.getTotalAmount());
-        resp.setExpireTime(order.getExpireTime());
-        resp.setSeatInfos(items.stream().map(OrderItem::getSeatInfo).collect(Collectors.toList()));
-        return Result.success(resp);
-    }
-
-    @Data
-    public static class SubmitRequest {
-        private Long sessionId;
-        private List<Long> seatIds;
     }
 }

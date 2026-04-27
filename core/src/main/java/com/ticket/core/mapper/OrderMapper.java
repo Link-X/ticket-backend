@@ -49,14 +49,18 @@ public interface OrderMapper {
                                @Param("payTime") LocalDateTime payTime);
 
     /**
-     * 按用户查询订单列表（按创建时间倒序，分页）
+     * 按用户查询订单列表（按创建时间倒序，分页），startTime/endTime 可选
      */
     List<Order> selectByUserId(@Param("userId") Long userId,
                                @Param("offset") int offset,
-                               @Param("limit") int limit);
+                               @Param("limit") int limit,
+                               @Param("startTime") LocalDateTime startTime,
+                               @Param("endTime") LocalDateTime endTime);
 
     /**
-     * 统计用户订单总数
+     * 统计用户订单总数，startTime/endTime 可选
      */
-    int countByUserId(@Param("userId") Long userId);
+    int countByUserId(@Param("userId") Long userId,
+                      @Param("startTime") LocalDateTime startTime,
+                      @Param("endTime") LocalDateTime endTime);
 }
