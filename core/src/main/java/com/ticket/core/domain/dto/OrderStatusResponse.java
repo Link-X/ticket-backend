@@ -10,6 +10,14 @@ import java.util.List;
  */
 @Data
 public class OrderStatusResponse {
+
+    @Data
+    public static class TicketInfo {
+        private String ticketNo;
+        private String qrCode;
+        private Integer status;
+        private LocalDateTime verifyTime;
+    }
     private Long orderId;
     private String orderNo;
     private Integer status;
@@ -18,6 +26,7 @@ public class OrderStatusResponse {
     private LocalDateTime payTime;
     private LocalDateTime expireTime;
     private List<String> seatInfos;
+    private List<TicketInfo> tickets;
 
     private String showName;
     private String showVenue;

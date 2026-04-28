@@ -39,7 +39,7 @@ public class PaymentController {
     public Result<Map<String, Object>> createPayment(@Valid @RequestBody PaymentRequest req) {
         Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
 
-        Order order = orderMapper.selectById(req.getOrderId());
+        Order order = orderMapper.selectByOrderNo(req.getOrderNo());
         if (order == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "订单不存在");
         }
@@ -58,7 +58,10 @@ public class PaymentController {
         payment.setAmount(order.getTotalAmount());
         payment.setStatus(1);
         payment.setTradeNo("MOCK-" + System.currentTimeMillis());
-        payment.setCallbackTime(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        payment.setCallbackTime(now);
+        payment.setCreateTime(now);
+        payment.setUpdateTime(now);
         paymentMapper.insert(payment);
 
         orderMapper.updateStatusAndPayTime(order.getId(), 1, LocalDateTime.now());

@@ -10,11 +10,13 @@ import com.ticket.core.domain.entity.OrderItem;
 import com.ticket.core.domain.entity.Seat;
 import com.ticket.core.domain.entity.Show;
 import com.ticket.core.domain.entity.ShowSession;
+import com.ticket.core.domain.entity.Ticket;
 import com.ticket.core.mapper.OrderItemMapper;
 import com.ticket.core.mapper.OrderMapper;
 import com.ticket.core.mapper.SeatMapper;
 import com.ticket.core.mapper.ShowMapper;
 import com.ticket.core.mapper.ShowSessionMapper;
+import com.ticket.core.mapper.TicketMapper;
 import com.ticket.core.mq.producer.OrderTimeoutProducer;
 import com.ticket.core.mq.producer.RefundProducer;
 import org.springframework.stereotype.Service;
@@ -43,6 +45,7 @@ public class OrderService {
     private final ShowSessionMapper showSessionMapper;
     private final OrderTimeoutProducer orderTimeoutProducer;
     private final RefundProducer refundProducer;
+    private final TicketMapper ticketMapper;
     private final SnowflakeIdGenerator snowflake = new SnowflakeIdGenerator(1, 1);
 
     public OrderService(OrderMapper orderMapper,
@@ -53,7 +56,8 @@ public class OrderService {
                         ShowMapper showMapper,
                         ShowSessionMapper showSessionMapper,
                         OrderTimeoutProducer orderTimeoutProducer,
-                        RefundProducer refundProducer) {
+                        RefundProducer refundProducer,
+                        TicketMapper ticketMapper) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.inventoryService = inventoryService;
@@ -63,6 +67,7 @@ public class OrderService {
         this.showSessionMapper = showSessionMapper;
         this.orderTimeoutProducer = orderTimeoutProducer;
         this.refundProducer = refundProducer;
+        this.ticketMapper = ticketMapper;
     }
 
     /**
@@ -280,6 +285,20 @@ public class OrderService {
             resp.setSessionName(session.getName());
             resp.setSessionStartTime(session.getStartTime());
         }
+
+        List<OrderStatusResponse.TicketInfo> tickets = ticketMapper.selectByOrderId(order.getId())
+                .stream()
+                .map(t -> {
+                    OrderStatusResponse.TicketInfo info = new OrderStatusResponse.TicketInfo();
+                    info.setTicketNo(t.getTicketNo());
+                    info.setQrCode(t.getQrCode());
+                    info.setStatus(t.getStatus());
+                    info.setVerifyTime(t.getVerifyTime());
+                    return info;
+                })
+                .collect(Collectors.toList());
+        resp.setTickets(tickets);
+
         return resp;
     }
 }

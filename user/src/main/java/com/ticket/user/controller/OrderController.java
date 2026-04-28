@@ -78,9 +78,9 @@ public class OrderController {
     }
 
     @PostMapping("/cancel")
-    public Result<Void> cancel(@RequestParam Long orderId) {
+    public Result<Void> cancel(@RequestParam String orderNo) {
         Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        Order order = orderService.getById(orderId);
+        Order order = orderService.getByOrderNo(orderNo);
         if (order == null) {
             throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
         }
@@ -89,10 +89,10 @@ public class OrderController {
         }
         if (order.getStatus() == 0) {
             // 未支付：直接同步取消，立即释放座位
-            orderService.cancelOrder(orderId);
+            orderService.cancelOrder(order.getId());
         } else if (order.getStatus() == 1) {
             // 已支付：发起退款，异步通过 MQ 处理
-            orderService.initiateRefund(orderId);
+            orderService.initiateRefund(order.getId());
         } else {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "当前订单状态不可取消");
         }

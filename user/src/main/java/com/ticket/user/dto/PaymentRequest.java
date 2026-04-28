@@ -6,7 +6,7 @@ import javax.validation.constraints.NotNull;
 
 @Data
 public class PaymentRequest {
-    @NotNull(message = "订单ID不能为空")
-    private Long orderId;
+    @NotNull(message = "订单号不能为空")
+    private String orderNo;
     private String channel;
 }

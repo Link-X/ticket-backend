@@ -7,7 +7,7 @@
 #   - admin  服务启动: 端口 8081
 #   - user   服务启动: 端口 8082
 #
-# 说明: token / sessionId / orderNo / qrCode 需从上一步响应中
+# 说明: token / sessionId / orderNo / orderId / qrCode 需从上一步响应中
 #       复制到下方对应变量后再执行后续请求
 
 @adminHost = http://localhost:8081
@@ -20,7 +20,7 @@
 @showId    = 1
 @sessionId = 1
 @orderNo   = 704156402284892160
-@orderId   = <从 submit 响应 data.orderId 复制，支付时用>
+@orderId   = <从 submit 响应 data.orderId 复制>
 @qrCode    = <支付后等票券异步生成，从 Admin 查询 ticket 表取 qrCode>
 
 ###
@@ -156,26 +156,25 @@ GET {{userHost}}/api/show/list
 GET {{userHost}}/api/show/session/seats?sessionId={{sessionId}}
 
 ###
-# Step 11: 提交购票请求（同步锁座 + 建单，直接返回完整订单）
+# Step 11: 提交购票请求（同步锁座 + 建单）
 # 需要 Authorization header
 # 预期:
 # {
 #   "code": 200,
 #   "data": {
-#     "orderId": 1,
-#     "orderNo": "...",
-#     "status": 0,
+#     "orderId": 123,                        ← 复制到 @orderId，支付/取消时使用
+#     "orderNo": "704156402284892160",        ← 复制到 @orderNo，查询详情时使用
+#     "status": 0,                           ← 0=待支付
+#     "totalAmount": 1360.00,
+#     "expireTime": "2026-06-01T19:05:00",   ← 5分钟后过期，前端据此展示倒计时
+#     "createTime": "2026-06-01T19:00:00",
+#     "seatInfos": ["2排02座", "2排03座"],
 #     "showName": "五月天演唱会",
 #     "showVenue": "国家体育场",
 #     "sessionName": "北京场 2026-06-01",
-#     "sessionStartTime": "2026-06-01T19:00:00",
-#     "seats": [{"seatId":1,"seatName":"1排01座","price":680.00}, ...],
-#     "totalAmount": 1360.00,
-#     "expireTime": "...",       ← 5分钟后过期，前端据此展示倒计时
-#     "remainSeconds": 299
+#     "sessionStartTime": "2026-06-01T19:00:00"
 #   }
 # }
-# 复制 data.orderNo 到 @orderNo，复制 data.orderId 到 @orderId
 # 注: 同时触发 RabbitMQ 超时消息（TTL=5分钟），超时未支付自动取消并释放库存
 POST {{userHost}}/api/order/submit
 Content-Type: application/json
@@ -187,15 +186,15 @@ Authorization: Bearer {{token}}
 }
 
 ###
-# Step 11.01: 取消订单
-# 需要 Authorization header
-
-POST {{userHost}}/api/order/cancel?orderId={{orderId}}
+# Step 11.1: 取消未支付订单（status=0）
+# 同步执行：MySQL order.status → 2(已取消)，Redis 座位恢复可售，限购计数 -1
+# 预期: {"code":200,"data":null}
+# 错误场景: 订单已支付/已取消 → {"code":400,"message":"当前订单状态不可取消"}
+POST {{userHost}}/api/order/cancel?orderNo={{orderNo}}
 Authorization: Bearer {{token}}
 
-
 ###
-# Step 11.1: 查询订单详情（验证 IDOR 防护：只能查自己的订单）
+# Step 11.2: 查询订单详情（验证 IDOR 防护：只能查自己的订单）
 # 预期: {"code":200,"data":{... 同 submit 响应结构 ...}}
 # 若 orderNo 属于其他用户，预期: {"code":403,"message":"禁止访问"}
 GET {{userHost}}/api/order/orderDetails?orderNo={{orderNo}}
@@ -206,17 +205,32 @@ Authorization: Bearer {{token}}
 # 预期: {"code":200,"data":{"status":"PAID","paymentNo":"..."}}
 # 注: 支付成功后通过 RabbitMQ Fanout 异步触发：
 #     - ticket.generate.queue → 生成票券（含 qrCode / ticketNo）
-#     - inventory.sync.queue  → 同步 seat.status = 已售
+#     - inventory.sync.queue  → 同步 seat.status = 已售(2)
 #     - notification.queue    → 通知（预留）
-# 如需获取 qrCode 做核验，稍等片刻后查询数据库 ticket 表或通过 Admin 接口查询
 POST {{userHost}}/api/payment/create
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "orderId": {{orderId}},
+  "orderNo": "{{orderNo}}",
   "channel": "mock"
 }
+
+###
+# Step 12.1: 取消已支付订单（退款，status=1）
+# 同步：MySQL order.status → 3(退款中)，立即返回
+# 异步（RabbitMQ refund.queue）：
+#     - Payment status → 2(已退款)
+#     - Redis 座位恢复可售
+#     - MySQL seat.status → 0(可用)
+#     - 限购计数 -1
+#     - Ticket status → 2(已作废)
+#     - MySQL order.status → 4(已退款)
+# 预期: {"code":200,"data":null}
+# 可通过 Step 11.2 轮询订单状态，status=4 表示退款完成
+# 错误场景: 订单不存在 → {"code":1005}，非本人订单 → {"code":403}
+POST {{userHost}}/api/order/cancel?orderNo={{orderNo}}
+Authorization: Bearer {{token}}
 
 ###
 # Step 13: 入场核验（扫码核销）
