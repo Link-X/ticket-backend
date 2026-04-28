@@ -49,4 +49,9 @@ public interface TicketMapper {
     int updateStatusAndVerifyTime(@Param("id") Long id,
                                   @Param("status") Integer status,
                                   @Param("verifyTime") LocalDateTime verifyTime);
+
+    /**
+     * 按订单 ID 批量作废票券（退款场景）
+     */
+    int invalidateByOrderId(@Param("orderId") Long orderId);
 }

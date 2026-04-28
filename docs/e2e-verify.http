@@ -14,12 +14,12 @@
 @userHost  = http://localhost:8082
 
 # 登录后将 token 填到这里
-@token = eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiI3MDM4OTU1MzUyODcyNzU1MjAiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiaWF0IjoxNzc3MjgzMTA4LCJleHAiOjE3NzcyODQ5MDh9.YS24mOjlkJ8Bv3HAq_U469cZUN-irFLj_k-x_KoqDwkUyOTPzoQJmCq9Z5wuWHuu
+@token = eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiI3MDM4OTU1MzUyODcyNzU1MjAiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiaWF0IjoxNzc3MzQzMTQxLCJleHAiOjE3Nzk5MzUxNDF9.xBCyXbGvqcuWT4LBSBt1Lnd2Wo-AThpLHaMiOyUcIuPI91bFsD0aPBawL8jO4pMj
 
 # 后续步骤自动依赖的 ID（从响应中取，手动填入）
 @showId    = 1
 @sessionId = 1
-@orderNo   = 703904632572874752
+@orderNo   = 704156402284892160
 @orderId   = <从 submit 响应 data.orderId 复制，支付时用>
 @qrCode    = <支付后等票券异步生成，从 Admin 查询 ticket 表取 qrCode>
 
@@ -183,8 +183,16 @@ Authorization: Bearer {{token}}
 
 {
   "sessionId": {{sessionId}},
-  "seatIds": [1, 2]
+  "seatIds": [5, 4]
 }
+
+###
+# Step 11.01: 取消订单
+# 需要 Authorization header
+
+POST {{userHost}}/api/order/cancel?orderId={{orderId}}
+Authorization: Bearer {{token}}
+
 
 ###
 # Step 11.1: 查询订单详情（验证 IDOR 防护：只能查自己的订单）

@@ -45,7 +45,7 @@ public class OrderController {
 
     @RateLimit(type = LimitType.BLACKLIST)
     @RateLimit(type = LimitType.IP,     limit = 30,  window = 60, message = "IP 请求过于频繁，请稍后再试")
-    @RateLimit(type = LimitType.USER,   limit = 8,   window = 60, message = "操作太频繁，请稍后再试")
+    @RateLimit(type = LimitType.USER,   limit = 5,   window = 60, message = "操作太频繁，请稍后再试")
     @RateLimit(type = LimitType.GLOBAL, limit = 50,  window = 1,  message = "系统繁忙，请稍后重试")
     @PostMapping("/submit")
     public Result<OrderStatusResponse> submit(@Valid @RequestBody SubmitOrderRequest req) {
@@ -75,6 +75,28 @@ public class OrderController {
 
         Order order = orderService.createOrder(orderReq);
         return Result.success(orderService.buildStatusResponse(order));
+    }
+
+    @PostMapping("/cancel")
+    public Result<Void> cancel(@RequestParam Long orderId) {
+        Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Order order = orderService.getById(orderId);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (order.getStatus() == 0) {
+            // 未支付：直接同步取消，立即释放座位
+            orderService.cancelOrder(orderId);
+        } else if (order.getStatus() == 1) {
+            // 已支付：发起退款，异步通过 MQ 处理
+            orderService.initiateRefund(orderId);
+        } else {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "当前订单状态不可取消");
+        }
+        return Result.success(null);
     }
 
     @GetMapping("/orderDetails")

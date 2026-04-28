@@ -18,6 +18,11 @@ public class RabbitMQConfig {
     public static final String ORDER_TIMEOUT_ROUTING_KEY = "order.timeout";
     public static final String ORDER_CANCEL_ROUTING_KEY  = "order.cancel";
 
+    // 退款相关
+    public static final String REFUND_EXCHANGE    = "refund.exchange";
+    public static final String REFUND_QUEUE       = "refund.queue";
+    public static final String REFUND_ROUTING_KEY = "refund";
+
     // 支付成功相关
     public static final String PAYMENT_SUCCESS_EXCHANGE  = "payment.success.exchange";
     public static final String TICKET_GENERATE_QUEUE     = "ticket.generate.queue";
@@ -100,5 +105,20 @@ public class RabbitMQConfig {
     @Bean
     public Binding notificationBinding() {
         return BindingBuilder.bind(notificationQueue()).to(paymentSuccessExchange());
+    }
+
+    @Bean
+    public DirectExchange refundExchange() {
+        return new DirectExchange(REFUND_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public Queue refundQueue() {
+        return QueueBuilder.durable(REFUND_QUEUE).build();
+    }
+
+    @Bean
+    public Binding refundBinding() {
+        return BindingBuilder.bind(refundQueue()).to(refundExchange()).with(REFUND_ROUTING_KEY);
     }
 }

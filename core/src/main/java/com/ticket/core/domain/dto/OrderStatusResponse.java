@@ -10,6 +10,7 @@ import java.util.List;
  */
 @Data
 public class OrderStatusResponse {
+    private Long orderId;
     private String orderNo;
     private Integer status;
     private BigDecimal totalAmount;

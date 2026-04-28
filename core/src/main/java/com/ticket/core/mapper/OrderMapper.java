@@ -30,9 +30,16 @@ public interface OrderMapper {
     Order selectByOrderNo(String orderNo);
 
     /**
-     * 更新订单状态
+     * 更新订单状态（前置状态固定为 0，用于超时/主动取消未支付订单）
      */
     int updateStatus(@Param("id") Long id, @Param("status") Integer status);
+
+    /**
+     * 条件更新订单状态（从 fromStatus 变更为 toStatus，乐观锁保护）
+     */
+    int updateStatusFrom(@Param("id") Long id,
+                         @Param("fromStatus") Integer fromStatus,
+                         @Param("toStatus") Integer toStatus);
 
     /**
      * 查询已过期待支付订单（status=0 且 expire_time < expireTime）

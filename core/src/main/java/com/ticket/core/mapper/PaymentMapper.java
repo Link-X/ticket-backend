@@ -29,4 +29,9 @@ public interface PaymentMapper {
      * 更新支付状态
      */
     int updateStatus(@Param("id") Long id, @Param("status") Integer status);
+
+    /**
+     * 按订单 ID 更新支付状态（退款场景）
+     */
+    int updateStatusByOrderId(@Param("orderId") Long orderId, @Param("status") Integer status);
 }

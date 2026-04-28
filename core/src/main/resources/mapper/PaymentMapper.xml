@@ -45,4 +45,11 @@
         WHERE id = #{id}
     </update>
 
+    <!-- 按订单 ID 更新支付状态（退款场景） -->
+    <update id="updateStatusByOrderId">
+        UPDATE payment
+        SET status = #{status}, update_time = NOW()
+        WHERE order_id = #{orderId}
+    </update>
+
 </mapper>

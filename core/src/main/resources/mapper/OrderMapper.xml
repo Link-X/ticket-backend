@@ -45,6 +45,13 @@
         WHERE id = #{id} AND status = 0
     </update>
 
+    <!-- 条件更新订单状态（从 fromStatus 变更为 toStatus，乐观锁保护） -->
+    <update id="updateStatusFrom">
+        UPDATE `order`
+        SET status = #{toStatus}, update_time = NOW()
+        WHERE id = #{id} AND status = #{fromStatus}
+    </update>
+
     <!-- 查询已过期待支付订单（status=0 且 expire_time < expireTime） -->
     <select id="selectExpiredOrders" resultMap="OrderResultMap">
         SELECT id, order_no, user_id, session_id, total_amount, status, pay_time, expire_time, create_time, update_time

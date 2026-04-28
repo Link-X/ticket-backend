@@ -72,6 +72,9 @@ public class AuthController {
         return Result.success(Map.of("token", token, "userId", user.getId()));
     }
 
+    @RateLimit(type = LimitType.BLACKLIST)
+    @RateLimit(type = LimitType.IP,     limit = 30,  window = 60, message = "IP 请求过于频繁，请稍后再试")
+    @RateLimit(type = LimitType.GLOBAL, limit = 50,  window = 1,  message = "系统繁忙，请稍后重试")
     @PostMapping("/login")
     public Result<Map<String, Object>> login(@Valid @RequestBody LoginRequest req) {
         User user = userMapper.selectByUsername(req.getUsername());

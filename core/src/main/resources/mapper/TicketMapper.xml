@@ -68,4 +68,11 @@
         WHERE id = #{id}
     </update>
 
+    <!-- 按订单 ID 批量作废票券（退款场景，status=2 表示已退款/作废） -->
+    <update id="invalidateByOrderId">
+        UPDATE ticket
+        SET status = 2, update_time = NOW()
+        WHERE order_id = #{orderId}
+    </update>
+
 </mapper>

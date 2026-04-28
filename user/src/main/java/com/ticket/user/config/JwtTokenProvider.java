@@ -18,7 +18,8 @@ public class JwtTokenProvider {
 
     // 生产环境应从配置文件读取，此处硬编码满足 HMAC-SHA 256位最小长度要求
     private static final String SECRET = "ticket-system-secret-key-must-be-at-least-256-bits!!";
-    private static final long EXPIRE_MS = 30 * 60 * 1000L; // 30 分钟
+    private static final long EXPIRE_MS = 30L * 24 * 60 * 60 * 1000; // 30 天
+
 
     private final SecretKey key = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
 

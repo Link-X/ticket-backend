@@ -16,6 +16,7 @@ import com.ticket.core.mapper.SeatMapper;
 import com.ticket.core.mapper.ShowMapper;
 import com.ticket.core.mapper.ShowSessionMapper;
 import com.ticket.core.mq.producer.OrderTimeoutProducer;
+import com.ticket.core.mq.producer.RefundProducer;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -41,6 +42,7 @@ public class OrderService {
     private final ShowMapper showMapper;
     private final ShowSessionMapper showSessionMapper;
     private final OrderTimeoutProducer orderTimeoutProducer;
+    private final RefundProducer refundProducer;
     private final SnowflakeIdGenerator snowflake = new SnowflakeIdGenerator(1, 1);
 
     public OrderService(OrderMapper orderMapper,
@@ -50,7 +52,8 @@ public class OrderService {
                         SeatMapper seatMapper,
                         ShowMapper showMapper,
                         ShowSessionMapper showSessionMapper,
-                        OrderTimeoutProducer orderTimeoutProducer) {
+                        OrderTimeoutProducer orderTimeoutProducer,
+                        RefundProducer refundProducer) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.inventoryService = inventoryService;
@@ -59,6 +62,7 @@ public class OrderService {
         this.showMapper = showMapper;
         this.showSessionMapper = showSessionMapper;
         this.orderTimeoutProducer = orderTimeoutProducer;
+        this.refundProducer = refundProducer;
     }
 
     /**
@@ -191,6 +195,24 @@ public class OrderService {
     }
 
     /**
+     * 发起退款（已支付订单取消）：同步更新状态为退款中，异步通过 MQ 完成后续退款操作
+     *
+     * @param orderId 订单 ID
+     */
+    public void initiateRefund(Long orderId) {
+        Order order = orderMapper.selectById(orderId);
+        if (order == null || order.getStatus() != 1) {
+            return;
+        }
+        // 乐观锁：只有 status=1 才更新为 3（退款中），防止并发重复发起
+        int affected = orderMapper.updateStatusFrom(orderId, 1, 3);
+        if (affected == 0) {
+            return;
+        }
+        refundProducer.sendRefund(orderId, order.getUserId(), order.getSessionId(), order.getOrderNo());
+    }
+
+    /**
      * 根据订单号查询订单
      *
      * @param orderNo 订单号
@@ -242,6 +264,7 @@ public class OrderService {
         Show show = session != null ? showMapper.selectById(session.getShowId()) : null;
 
         OrderStatusResponse resp = new OrderStatusResponse();
+        resp.setOrderId(order.getId());
         resp.setOrderNo(order.getOrderNo());
         resp.setStatus(order.getStatus());
         resp.setTotalAmount(order.getTotalAmount());
