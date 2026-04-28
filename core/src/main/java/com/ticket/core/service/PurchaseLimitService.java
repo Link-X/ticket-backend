@@ -32,21 +32,28 @@ public class PurchaseLimitService {
             "local count = redis.call('GET', KEYS[1])\n" +
             "if count == false then count = 0 else count = tonumber(count) end\n" +
             "local limit = tonumber(ARGV[1])\n" +
-            "if count >= limit then return 0 end\n" +
-            "redis.call('INCR', KEYS[1])\n" +
-            "if count == 0 then\n" +
+            "local seatCount = tonumber(ARGV[2])\n" +
+            "if count + seatCount > limit then return 0 end\n" +
+            "local newCount = redis.call('INCRBY', KEYS[1], seatCount)\n" +
+            "if newCount == seatCount then\n" +
             "  redis.call('EXPIRE', KEYS[1], 604800)\n" +
             "end\n" +
             "return 1"
         );
 
         DECR_SAFE_SCRIPT = new DefaultRedisScript<>();
+        DECR_SAFE_SCRIPT.setResultType(Long.class);
         DECR_SAFE_SCRIPT.setScriptText(
             "local v = redis.call('GET', KEYS[1])\n" +
             "if v == false or tonumber(v) <= 0 then return 0 end\n" +
-            "return redis.call('DECR', KEYS[1])"
+            "local seatCount = tonumber(ARGV[1])\n" +
+            "local current = tonumber(v)\n" +
+            "if current <= seatCount then\n" +
+            "  redis.call('SET', KEYS[1], 0)\n" +
+            "  return 0\n" +
+            "end\n" +
+            "return redis.call('DECRBY', KEYS[1], seatCount)"
         );
-        DECR_SAFE_SCRIPT.setResultType(Long.class);
     }
 
     private final StringRedisTemplate redisTemplate;
@@ -63,12 +70,13 @@ public class PurchaseLimitService {
      * @param limit     购票限额
      * @return 如果成功递增（未达到限额）返回 true，否则返回 false
      */
-    public boolean checkAndIncrement(long sessionId, long userId, int limit) {
+    public boolean checkAndIncrement(long sessionId, long userId, int limit, int seatCount) {
         String key = RedisKeys.sessionPurchase(sessionId, userId);
         Long result = redisTemplate.execute(
                 CHECK_AND_INCR_SCRIPT,
                 Collections.singletonList(key),
-                String.valueOf(limit)
+                String.valueOf(limit),
+                String.valueOf(seatCount)
         );
         return Long.valueOf(1L).equals(result);
     }
@@ -80,28 +88,21 @@ public class PurchaseLimitService {
      * @param sessionId 场次 ID
      * @param userId    用户 ID
      */
-    public void decrement(long sessionId, long userId) {
+    public void decrement(long sessionId, long userId, int seatCount) {
         String key = RedisKeys.sessionPurchase(sessionId, userId);
-        redisTemplate.execute(DECR_SAFE_SCRIPT, Collections.singletonList(key));
+        redisTemplate.execute(DECR_SAFE_SCRIPT, Collections.singletonList(key), String.valueOf(seatCount));
     }
 
     /**
-     * 获取用户在该场次的当前购买数量
-     *
-     * @param sessionId 场次 ID
-     * @param userId    用户 ID
-     * @return 购买数量（key 不存在返回 0）
+     * 将计数重置为指定值（用于服务重启后的自愈修正）
      */
-    public int getPurchaseCount(long sessionId, long userId) {
+    public void resetCount(long sessionId, long userId, int count) {
         String key = RedisKeys.sessionPurchase(sessionId, userId);
-        String value = redisTemplate.opsForValue().get(key);
-        if (value == null) {
-            return 0;
-        }
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException e) {
-            return 0;
+        if (count <= 0) {
+            redisTemplate.delete(key);
+        } else {
+            redisTemplate.opsForValue().set(key, String.valueOf(count));
         }
     }
+
 }

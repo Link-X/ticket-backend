@@ -44,4 +44,13 @@
           AND o.status IN (0, 1)
     </select>
 
+    <!-- 按 (sessionId, userId) 聚合有效订单座位数，用于启动时对账 Redis 限购计数 -->
+    <select id="selectActiveSeatCounts" resultType="map">
+        SELECT o.session_id AS sessionId, o.user_id AS userId, COUNT(oi.id) AS seatCount
+        FROM order_item oi
+                 JOIN `order` o ON oi.order_id = o.id
+        WHERE o.status IN (0, 1)
+        GROUP BY o.session_id, o.user_id
+    </select>
+
 </mapper>

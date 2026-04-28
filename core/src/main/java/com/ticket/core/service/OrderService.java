@@ -88,7 +88,7 @@ public class OrderService {
                 for (Long id : seatIds) {
                     inventoryService.releaseSeat(sessionId, id);
                 }
-                purchaseLimitService.decrement(sessionId, userId);
+                purchaseLimitService.decrement(sessionId, userId, seatIds.size());
                 throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
             }
         }
@@ -97,7 +97,7 @@ public class OrderService {
         List<Seat> seatList = seatMapper.selectByIds(seatIds);
         if (seatList.size() != seatIds.size()) {
             for (Long id : seatIds) inventoryService.releaseSeat(sessionId, id);
-            purchaseLimitService.decrement(sessionId, userId);
+            purchaseLimitService.decrement(sessionId, userId, seatIds.size());
             throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
         }
 
@@ -107,7 +107,7 @@ public class OrderService {
             if (seat.getType() == 2 || seat.getType() == 3) {
                 if (seat.getPairSeatId() == null || !seatIdSet.contains(seat.getPairSeatId())) {
                     for (Long id : seatIds) inventoryService.releaseSeat(sessionId, id);
-                    purchaseLimitService.decrement(sessionId, userId);
+                    purchaseLimitService.decrement(sessionId, userId, seatIds.size());
                     throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
                 }
             }
@@ -123,7 +123,7 @@ public class OrderService {
             String priceStr = inventoryService.getAreaPrice(sessionId, seat.getAreaId());
             if (priceStr == null) {
                 for (Long id : seatIds) inventoryService.releaseSeat(sessionId, id);
-                purchaseLimitService.decrement(sessionId, userId);
+                purchaseLimitService.decrement(sessionId, userId, seatIds.size());
                 throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
             }
             BigDecimal price = new BigDecimal(priceStr);
@@ -195,8 +195,8 @@ public class OrderService {
             inventoryService.releaseSeat(order.getSessionId(), item.getSeatId());
         }
 
-        // 5. 回滚限购计数
-        purchaseLimitService.decrement(order.getSessionId(), order.getUserId());
+        // 5. 回滚限购计数（按实际座位数释放）
+        purchaseLimitService.decrement(order.getSessionId(), order.getUserId(), items.size());
     }
 
     /**
@@ -214,7 +214,12 @@ public class OrderService {
         if (affected == 0) {
             return;
         }
-        refundProducer.sendRefund(orderId, order.getUserId(), order.getSessionId(), order.getOrderNo());
+        // 立即将座位恢复到 Redis 可售集合，座位图实时生效，无需等待 MQ 异步处理
+        List<OrderItem> items = orderItemMapper.selectByOrderId(orderId);
+        for (OrderItem item : items) {
+            inventoryService.releaseSeat(order.getSessionId(), item.getSeatId());
+        }
+        refundProducer.sendRefund(orderId);
     }
 
     /**

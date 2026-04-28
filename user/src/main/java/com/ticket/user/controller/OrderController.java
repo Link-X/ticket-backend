@@ -12,6 +12,7 @@ import com.ticket.core.service.OrderService;
 import com.ticket.core.service.PurchaseLimitService;
 import com.ticket.core.service.SeatInventoryService;
 import com.ticket.core.service.ShowService;
+import lombok.extern.slf4j.Slf4j;
 import com.ticket.user.dto.SubmitOrderRequest;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -22,6 +23,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/order")
 public class OrderController {
@@ -55,8 +57,9 @@ public class OrderController {
         if (session == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "场次不存在");
         }
+        int seatCount = req.getSeatIds().size();
         boolean allowed = purchaseLimitService.checkAndIncrement(
-                req.getSessionId(), userId, session.getLimitPerUser());
+                req.getSessionId(), userId, session.getLimitPerUser(), seatCount);
         if (!allowed) {
             throw new BusinessException(ErrorCode.EXCEED_PURCHASE_LIMIT);
         }
@@ -64,7 +67,7 @@ public class OrderController {
         boolean locked = inventoryService.batchLockSeats(
                 req.getSessionId(), req.getSeatIds(), String.valueOf(userId), SEAT_LOCK_TTL);
         if (!locked) {
-            purchaseLimitService.decrement(req.getSessionId(), userId);
+            purchaseLimitService.decrement(req.getSessionId(), userId, seatCount);
             throw new BusinessException(ErrorCode.SEAT_NOT_AVAILABLE);
         }
 
