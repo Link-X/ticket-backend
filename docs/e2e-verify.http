@@ -1,14 +1,14 @@
 # 抢票系统 端到端验证脚本
 # 工具: IntelliJ HTTP Client / VS Code REST Client
 #
-# 执行顺序: 按步骤 1→13 依次运行
+# 执行顺序: 按步骤依次运行
 # 前置条件:
 #   - docker-compose up -d  (MySQL:3306 + Redis:6379 + RabbitMQ:5672)
 #   - admin  服务启动: 端口 8081
 #   - user   服务启动: 端口 8082
 #
-# 说明: token / sessionId / orderNo / orderId / qrCode 需从上一步响应中
-#       复制到下方对应变量后再执行后续请求
+# 说明: token / roomId / sessionId / orderNo / orderId / ticketNo / qrCode
+#       需从上一步响应中复制到下方对应变量后再执行后续请求
 
 @adminHost = http://localhost:8081
 @userHost  = http://localhost:8082
@@ -17,11 +17,13 @@
 @token = eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiI3MDQ5MTQxNDM1NjQwMDk0NzIiLCJ1c2VybmFtZSI6InhkYiIsImlhdCI6MTc3NzUyMzgyOCwiZXhwIjoxNzgwMTE1ODI4fQ.E8dwttWo3o9-tX43LcQAbOYFAQP99xHzFidmXmakJlPHTix__HEv7caOlAYCkFJe
 
 # 后续步骤自动依赖的 ID（从响应中取，手动填入）
+@roomId    = <从 room/create 响应 data.id 复制>
 @showId    = 2
 @sessionId = 2
 @orderNo   = 704179544755671040
 @orderId   = <从 submit 响应 data.orderId 复制>
-@qrCode    = <支付后等票券异步生成，从 Admin 查询 ticket 表取 qrCode>
+@ticketNo  = <从 orderDetails 响应 data.tickets[0].ticketNo 复制>
+@qrCode    = <支付后等票券异步生成，从 orderDetails 响应 data.tickets[0].qrCode 复制>
 
 ###
 # Step 1: 注册用户
@@ -48,8 +50,76 @@ Content-Type: application/json
 }
 
 ###
-# Step 3: 创建演出 (Admin) → 复制 data.id 到 @showId
-# 预期: {"code":200,"data":{"id":1,"name":"五月天演唱会",...}}
+# ──────────── Admin 场地管理 ────────────
+
+###
+# Step 3: 创建场地 (Admin) → 复制 data.id 到 @roomId
+# 场地是座位模板，可被多个场次复用
+# 预期: {"code":200,"data":{"id":1,"name":"乡下体育场",...}}
+POST {{adminHost}}/api/admin/room/create
+Content-Type: application/json
+
+{
+  "name": "乡下体育场-主馆",
+  "venue": "乡下体育场",
+  "rowCount": 2,
+  "colCount": 3,
+  "description": "2排3列，共6座"
+}
+
+###
+# Step 4: 场地批量保存座位模板 (Admin)
+# 覆盖写；type: 1=普通, 2=情侣左, 3=情侣右
+# 预期: {"code":200,"data":"座位模板保存成功，共 6 个"}
+POST {{adminHost}}/api/admin/room/seat/batch
+Content-Type: application/json
+
+{
+  "roomId": {{roomId}},
+  "seats": [
+    {"rowNo": 1, "colNo": 1, "type": 1, "areaId": "0", "seatName": "1排01座"},
+    {"rowNo": 1, "colNo": 2, "type": 1, "areaId": "0", "seatName": "1排02座"},
+    {"rowNo": 1, "colNo": 3, "type": 1, "areaId": "0", "seatName": "1排03座"},
+    {"rowNo": 2, "colNo": 1, "type": 1, "areaId": "1", "seatName": "2排01座"},
+    {"rowNo": 2, "colNo": 2, "type": 1, "areaId": "1", "seatName": "2排02座"},
+    {"rowNo": 2, "colNo": 3, "type": 1, "areaId": "1", "seatName": "2排03座"}
+  ]
+}
+
+###
+# Step 5: 场地保存默认价格区域 (Admin)
+# 覆盖写；创建场次关联此场地时，价格区域自动复制过去
+# 预期: {"code":200,"data":"价格区域保存成功"}
+POST {{adminHost}}/api/admin/room/area/save
+Content-Type: application/json
+
+{
+  "roomId": {{roomId}},
+  "areas": [
+    {"areaId": "0", "defaultPrice": 20.00, "defaultOriginPrice": 80.00},
+    {"areaId": "1", "defaultPrice": 80.00, "defaultOriginPrice": 150.00}
+  ]
+}
+
+###
+# Step 5.1: 查询场地列表 (Admin)
+# 预期: {"code":200,"data":[{"id":1,"name":"乡下体育场-主馆",...}]}
+GET {{adminHost}}/api/admin/room/list
+
+###
+# Step 5.2: 查询场地座位模板 (Admin)
+GET {{adminHost}}/api/admin/room/seat/list?roomId={{roomId}}
+
+###
+# Step 5.3: 查询场地价格区域 (Admin)
+GET {{adminHost}}/api/admin/room/area/list?roomId={{roomId}}
+
+###
+# ──────────── Admin 演出/场次管理 ────────────
+
+###
+# Step 6: 创建演出 (Admin) → 复制 data.id 到 @showId
+# 预期: {"code":200,"data":{"id":1,"name":"大冬天脱口秀",...}}
 POST {{adminHost}}/api/admin/show/create
 Content-Type: application/json
 
@@ -62,17 +132,40 @@ Content-Type: application/json
 }
 
 ###
-# Step 4: 创建场次 (Admin) → 复制 data.id 到 @sessionId
-# rowCount/colCount 定义座位网格尺寸（2排×3列）
-# 预期: {"code":200,"data":{"id":1,"showId":1,"rowCount":2,"colCount":3,...}}
+# Step 6.1: 更新演出信息 (Admin)
+# 预期: {"code":200,"data":{"id":1,...}}
+PUT {{adminHost}}/api/admin/show/update
+Content-Type: application/json
+
+{
+  "id": {{showId}},
+  "name": "大冬天脱口秀（已更新）",
+  "description": "2036 年巡回脱口秀",
+  "category": "脱口秀",
+  "venue": "乡下体育场",
+  "posterUrl": "https://example.com/poster.jpg"
+}
+
+###
+# Step 6.2: 查询演出列表 (Admin)，可按 status 筛选
+GET {{adminHost}}/api/admin/show/list
+
+###
+# Step 7: 创建场次 (Admin) → 复制 data.id 到 @sessionId
+#
+# 方式 A（推荐）: 填写 roomId → 座位和价格区域自动从场地模板复制，无需再执行 Step 8/9
+# 方式 B: 不填 roomId → 自行执行 Step 8（保存价格区域）和 Step 9（批量建座位）
+#
+# 预期: {"code":200,"data":{"id":1,"showId":1,"roomId":1,...}}
 POST {{adminHost}}/api/admin/session/create
 Content-Type: application/json
 
 {
   "showId": {{showId}},
-  "name": "上海 3026-06-01",
+  "roomId": {{roomId}},
+  "name": "上海 2036-06-01",
   "startTime": "2036-06-01T19:00:00",
-  "endTime": "2023-06-01T22:00:00",
+  "endTime": "2036-06-01T22:00:00",
   "totalSeats": 6,
   "limitPerUser": 4,
   "rowCount": 2,
@@ -80,8 +173,29 @@ Content-Type: application/json
 }
 
 ###
-# Step 5: 保存价格区域 (Admin)
-# area_id="0" 普通区 680元，area_id="1" VIP区 1280元
+# Step 7.1: 更新场次信息 (Admin)
+PUT {{adminHost}}/api/admin/session/update
+Content-Type: application/json
+
+{
+  "id": {{sessionId}},
+  "showId": {{showId}},
+  "roomId": {{roomId}},
+  "name": "上海 2036-06-01（已更新）",
+  "startTime": "2036-06-01T19:00:00",
+  "endTime": "2036-06-01T22:00:00",
+  "totalSeats": 6,
+  "limitPerUser": 4
+}
+
+###
+# Step 7.2: 查询场次列表 (Admin)
+GET {{adminHost}}/api/admin/session/list?showId={{showId}}
+
+###
+# Step 8: 保存场次价格区域 (Admin)
+# 仅在方式 B（不关联 roomId）或需覆盖场地默认价格时执行
+# area_id="0" 普通区，area_id="1" VIP区
 # 预期: {"code":200,"data":"价格区域保存成功"}
 POST {{adminHost}}/api/admin/seat/area/save
 Content-Type: application/json
@@ -95,8 +209,9 @@ Content-Type: application/json
 }
 
 ###
-# Step 6: 批量创建座位 (Admin)
-# type: 1=普通, 2=情侣左, 3=情侣右；areaId 对应上一步保存的区域
+# Step 9: 批量创建座位 (Admin)
+# 仅在方式 B（不关联 roomId）时执行
+# type: 1=普通, 2=情侣左, 3=情侣右
 # 预期: {"code":200,"data":[{"id":1,...},{"id":2,...},...]}
 POST {{adminHost}}/api/admin/seat/batch
 Content-Type: application/json
@@ -104,29 +219,32 @@ Content-Type: application/json
 {
   "sessionId": {{sessionId}},
   "seats": [
-    {"rowNo": 1, "colNo": 1, "type": 1, "areaId": "0", "seatName": "3排01座"},
-    {"rowNo": 1, "colNo": 2, "type": 1, "areaId": "0", "seatName": "3排02座"},
-    {"rowNo": 1, "colNo": 3, "type": 1, "areaId": "0", "seatName": "3排03座"},
-    {"rowNo": 2, "colNo": 1, "type": 1, "areaId": "1", "seatName": "5排01座"},
-    {"rowNo": 2, "colNo": 2, "type": 1, "areaId": "1", "seatName": "6排02座"},
-    {"rowNo": 2, "colNo": 3, "type": 1, "areaId": "1", "seatName": "6排03座"}
+    {"rowNo": 1, "colNo": 1, "type": 1, "areaId": "0", "seatName": "1排01座"},
+    {"rowNo": 1, "colNo": 2, "type": 1, "areaId": "0", "seatName": "1排02座"},
+    {"rowNo": 1, "colNo": 3, "type": 1, "areaId": "0", "seatName": "1排03座"},
+    {"rowNo": 2, "colNo": 1, "type": 1, "areaId": "1", "seatName": "2排01座"},
+    {"rowNo": 2, "colNo": 2, "type": 1, "areaId": "1", "seatName": "2排02座"},
+    {"rowNo": 2, "colNo": 3, "type": 1, "areaId": "1", "seatName": "2排03座"}
   ]
 }
 
 ###
-# Step 7: 发布场次开售 (Admin)
+# Step 10: 发布场次开售 (Admin)
 # 场次状态变为"已发布/开售"
 # 预期: {"code":200,"data":"发布成功"}
 PUT {{adminHost}}/api/admin/session/{{sessionId}}/publish
 
 ###
-# Step 8: 预热座位库存到 Redis (Admin)
+# Step 11: 预热座位库存到 Redis (Admin)
 # 将座位 ID 写入 Redis Set，并缓存座位详情和价格区域
 # 预期: {"code":200,"data":"预热完成，共 6 个座位，2 个价格区域"}
 POST {{adminHost}}/api/admin/seat/warmup/{{sessionId}}
 
 ###
-# Step 9: 用户端查看上架演出列表（分页，支持 name/category/venue 筛选）
+# ──────────── User 浏览 ────────────
+
+###
+# Step 12: 用户端查看上架演出列表（分页，支持 name/category/venue 筛选）
 # 预期: {"code":200,"data":{"total":1,"list":[{"id":1,"name":"大冬天脱口秀",...}]}}
 POST {{userHost}}/api/show/list
 Content-Type: application/json
@@ -137,7 +255,24 @@ Content-Type: application/json
 }
 
 ###
-# Step 10: 查看场次座位图（含价格区域和网格化座位信息）
+# Step 12.1: 查看演出详情
+# 预期: {"code":200,"data":{"id":1,"name":"大冬天脱口秀",...}}
+GET {{userHost}}/api/show/{{showId}}
+
+###
+# Step 13: 查询演出下的场次列表（分页，支持按状态和时间筛选）
+# 预期: {"code":200,"data":{"total":1,"list":[{"id":1,"showId":1,...}]}}
+POST {{userHost}}/api/session/list
+Content-Type: application/json
+
+{
+  "showId": {{showId}},
+  "page": 1,
+  "size": 10
+}
+
+###
+# Step 14: 查看场次座位图（含价格区域和网格化座位信息）
 # 预期:
 # {
 #   "code": 200,
@@ -151,10 +286,9 @@ Content-Type: application/json
 #       "columnCount": 3,
 #       "seatRows": [
 #         {"rowsId":"1","rowsNum":"1","columns":[
-#           {"colId":"1","colNum":"1","seatName":"3排01座","type":1,"areaId":"0","status":0},
+#           {"colId":"1","colNum":"1","seatName":"1排01座","type":1,"areaId":"0","status":0},
 #           ...
-#         ]},
-#         ...
+#         ]}
 #       ]
 #     }
 #   }
@@ -167,23 +301,26 @@ Content-Type: application/json
 }
 
 ###
-# Step 11: 提交购票请求（同步锁座 + 建单）
+# ──────────── User 下单/支付 ────────────
+
+###
+# Step 15: 提交购票请求（同步锁座 + 建单）
 # 需要 Authorization header
+# 复制 data.orderId → @orderId，data.orderNo → @orderNo
 # 预期:
 # {
 #   "code": 200,
 #   "data": {
-#     "orderId": 123,                        ← 复制到 @orderId，支付/取消时使用
-#     "orderNo": "704156402284892160",        ← 复制到 @orderNo，查询详情时使用
-#     "status": 0,                           ← 0=待支付
-#     "totalAmount": 1360.00,
-#     "expireTime": "2026-06-01T19:05:00",   ← 5分钟后过期，前端据此展示倒计时
-#     "createTime": "2026-06-01T19:00:00",
-#     "seatInfos": ["2排02座", "2排03座"],
-#     "showName": "五月天演唱会",
-#     "showVenue": "国家体育场",
-#     "sessionName": "北京场 2026-06-01",
-#     "sessionStartTime": "2026-06-01T19:00:00"
+#     "orderId": 123,
+#     "orderNo": "704156402284892160",
+#     "status": 0,
+#     "totalAmount": 100.00,
+#     "expireTime": "2036-06-01T19:05:00",
+#     "seatInfos": ["1排01座", "1排02座"],
+#     "showName": "大冬天脱口秀",
+#     "showVenue": "乡下体育场",
+#     "sessionName": "上海 2036-06-01",
+#     "sessionStartTime": "2036-06-01T19:00:00"
 #   }
 # }
 # 注: 同时触发 RabbitMQ 超时消息（TTL=5分钟），超时未支付自动取消并释放库存
@@ -197,7 +334,7 @@ Authorization: Bearer {{token}}
 }
 
 ###
-# Step 11.1: 取消未支付订单（status=0）
+# Step 15.1: 取消未支付订单（status=0）
 # 同步执行：MySQL order.status → 2(已取消)，Redis 座位恢复可售，限购计数 -1
 # 预期: {"code":200,"data":null}
 # 错误场景: 订单已支付/已取消 → {"code":400,"message":"当前订单状态不可取消"}
@@ -210,14 +347,28 @@ Authorization: Bearer {{token}}
 }
 
 ###
-# Step 11.2: 查询订单详情（验证 IDOR 防护：只能查自己的订单）
-# 预期: {"code":200,"data":{... 同 submit 响应结构 ...}}
-# 若 orderNo 属于其他用户，预期: {"code":403,"message":"禁止访问"}
+# Step 15.2: 查询订单详情（验证 IDOR 防护：只能查自己的订单）
+# 支付成功后响应中包含 tickets 列表，可从中取 ticketNo / qrCode
+# 预期: {"code":200,"data":{... 含 tickets:[{ticketNo, qrCode, status, verifyTime}] ...}}
+# 若 orderNo 属于其他用户: {"code":403,"message":"禁止访问"}
 GET {{userHost}}/api/order/orderDetails?orderNo={{orderNo}}
 Authorization: Bearer {{token}}
 
 ###
-# Step 12: 支付订单（Mock 网关，直接成功）
+# Step 15.3: 查询用户订单列表（分页，可按状态和时间筛选）
+# status: 0-待支付 1-已支付 2-已取消 3-退款中 4-已退款，不传则查全部
+# 预期: {"code":200,"data":{"total":1,"list":[...]}}
+POST {{userHost}}/api/order/list
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "page": 1,
+  "size": 10
+}
+
+###
+# Step 16: 支付订单（Mock 网关，直接成功）
 # 预期: {"code":200,"data":{"status":"PAID","paymentNo":"..."}}
 # 注: 支付成功后通过 RabbitMQ Fanout 异步触发：
 #     - ticket.generate.queue → 生成票券（含 qrCode / ticketNo）
@@ -233,7 +384,21 @@ Authorization: Bearer {{token}}
 }
 
 ###
-# Step 12.1: 取消已支付订单（退款，status=1 或 status=5 部分退款均可）
+# Step 16.1: 单张退票（已支付订单，按 ticketNo 退单张）
+# ticketNo 从 Step 15.2 响应 data.tickets[0].ticketNo 取
+# 异步退款流程同 Step 16.2
+# 预期: {"code":200,"data":null}
+POST {{userHost}}/api/order/refundTicket
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "orderNo": "{{orderNo}}",
+  "ticketNo": "{{ticketNo}}"
+}
+
+###
+# Step 16.2: 取消已支付订单（退款，status=1 或 status=5 部分退款均可）
 # 同步：MySQL order.status → 3(退款中)，立即返回
 # 异步（RabbitMQ refund.queue）：
 #     - Payment status → 2(已退款)
@@ -243,8 +408,7 @@ Authorization: Bearer {{token}}
 #     - Ticket status → 2(已作废)
 #     - MySQL order.status → 4(已退款)
 # 预期: {"code":200,"data":null}
-# 可通过 Step 11.2 轮询订单状态，status=4 表示退款完成
-# 错误场景: 订单不存在 → {"code":1005}，非本人订单 → {"code":403}
+# 可通过 Step 15.2 轮询订单状态，status=4 表示退款完成
 POST {{userHost}}/api/order/cancel
 Content-Type: application/json
 Authorization: Bearer {{token}}
@@ -254,8 +418,11 @@ Authorization: Bearer {{token}}
 }
 
 ###
-# Step 13: 入场核验（扫码核销）
-# qrCode 从 ticket 表 qr_code 字段取（支付成功后异步生成，通常毫秒级完成）
+# ──────────── 入场核验 ────────────
+
+###
+# Step 17: 扫码核销（二维码）
+# qrCode 从 Step 15.2 响应 data.tickets[0].qrCode 取（支付后异步生成）
 # 预期: {"code":200,"data":{"id":...,"status":1,"verifyTime":"..."}}
 POST {{userHost}}/api/verify/qr
 Content-Type: application/json
@@ -263,3 +430,31 @@ Content-Type: application/json
 {
   "qrCode": "{{qrCode}}"
 }
+
+###
+# Step 17.1: 票券号核销（替代扫码，输入 ticketNo 核销）
+# ticketNo 从 Step 15.2 响应 data.tickets[0].ticketNo 取
+# 预期: {"code":200,"data":{"id":...,"status":1,"verifyTime":"..."}}
+POST {{userHost}}/api/verify/ticket
+Content-Type: application/json
+
+{
+  "ticketNo": "{{ticketNo}}"
+}
+
+###
+# ──────────── Admin 监控 & 订单查询 ────────────
+
+###
+# Step 18: 场次监控看板 (Admin)
+# 预期: {"code":200,"data":{"sessionId":1,"totalSeats":6,"availableCount":4,"soldCount":2}}
+GET {{adminHost}}/api/admin/monitor/dashboard?sessionId={{sessionId}}
+
+###
+# Step 19: Admin 按订单号查询订单
+# 预期: {"code":200,"data":{"id":...,"orderNo":"...","status":...}}
+GET {{adminHost}}/api/admin/order/query?orderNo={{orderNo}}
+
+###
+# Step 19.1: Admin 查询订单关联座位
+GET {{adminHost}}/api/admin/order/{{orderId}}/items
