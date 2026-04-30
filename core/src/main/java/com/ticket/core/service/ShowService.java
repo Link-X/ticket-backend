@@ -242,6 +242,7 @@ public class ShowService {
         seatSection.setSeatRows(seatRows);
 
         SessionSeatResponse response = new SessionSeatResponse();
+        response.setSession(session);
         response.setAreaPriceList(areaPriceList);
         response.setSeatSection(seatSection);
         return response;
