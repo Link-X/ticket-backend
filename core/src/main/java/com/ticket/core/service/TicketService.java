@@ -48,6 +48,7 @@ public class TicketService {
         for (OrderItem item : orderItems) {
             Ticket ticket = new Ticket();
             ticket.setId(snowflake.nextId());
+            ticket.setSeatId(item.getSeatId());
             ticket.setQrCode(UUID.randomUUID().toString());
 
             // 生成唯一的票号

@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 public class Ticket {
     private Long id;
     private Long orderId;
+    private Long seatId;
     private Long userId;
     private String qrCode;
     private String ticketNo;

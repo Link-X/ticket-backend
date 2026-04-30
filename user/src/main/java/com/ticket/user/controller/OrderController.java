@@ -15,6 +15,7 @@ import com.ticket.core.service.ShowService;
 import lombok.extern.slf4j.Slf4j;
 import com.ticket.user.dto.CancelOrderRequest;
 import com.ticket.user.dto.OrderListRequest;
+import com.ticket.user.dto.RefundTicketRequest;
 import com.ticket.user.dto.SubmitOrderRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -113,6 +114,13 @@ public class OrderController {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
         return Result.success(orderService.buildStatusResponse(order));
+    }
+
+    @PostMapping("/refundTicket")
+    public Result<Void> refundTicket(@Valid @RequestBody RefundTicketRequest req) {
+        Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        orderService.initiateTicketRefund(req.getOrderNo(), req.getTicketNo(), userId);
+        return Result.success(null);
     }
 
     @PostMapping("/list")

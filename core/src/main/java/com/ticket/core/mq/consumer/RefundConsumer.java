@@ -1,21 +1,20 @@
 package com.ticket.core.mq.consumer;
 
-import com.ticket.core.domain.entity.Order;
-import com.ticket.core.domain.entity.OrderItem;
 import com.ticket.core.mapper.OrderItemMapper;
 import com.ticket.core.mapper.OrderMapper;
 import com.ticket.core.mapper.PaymentMapper;
 import com.ticket.core.mapper.SeatMapper;
 import com.ticket.core.mapper.TicketMapper;
 import com.ticket.core.mq.config.RabbitMQConfig;
+import com.ticket.core.mq.event.RefundEvent;
 import com.ticket.core.service.PurchaseLimitService;
 import com.ticket.core.service.SeatInventoryService;
+import com.ticket.core.domain.entity.Order;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -46,8 +45,10 @@ public class RefundConsumer {
     }
 
     @RabbitListener(queues = RabbitMQConfig.REFUND_QUEUE)
-    public void handleRefund(Long orderId) {
-        log.info("处理退款，orderId={}", orderId);
+    public void handleRefund(RefundEvent event) {
+        Long orderId = event.getOrderId();
+        List<Long> refundSeatIds = event.getRefundSeatIds();
+        log.info("处理退款，orderId={}，退款座位数={}", orderId, refundSeatIds.size());
         try {
             Order order = orderMapper.selectById(orderId);
             if (order == null) {
@@ -55,32 +56,31 @@ public class RefundConsumer {
                 return;
             }
 
-            List<OrderItem> items = orderItemMapper.selectByOrderId(orderId);
-            List<Long> seatIds = items.stream().map(OrderItem::getSeatId).collect(Collectors.toList());
-
-            // 1. mock 退款：更新支付记录状态为已退款(2)
+            // 1. 更新支付记录状态为已退款(2)
             paymentMapper.updateStatusByOrderId(orderId, 2);
 
             // 2. Redis 座位恢复可售（initiateRefund 已同步执行，此处幂等兜底）
-            for (Long seatId : seatIds) {
+            for (Long seatId : refundSeatIds) {
                 inventoryService.releaseSeat(order.getSessionId(), seatId);
             }
 
-            // 3. MySQL 座位状态恢复为可用(0)
-            if (!seatIds.isEmpty()) {
-                seatMapper.batchUpdateStatus(seatIds, 0);
+            // 3. MySQL 退款座位状态恢复为可售(0)
+            if (!refundSeatIds.isEmpty()) {
+                seatMapper.batchUpdateStatus(refundSeatIds, 0);
             }
 
-            // 4. 回滚限购计数
-            purchaseLimitService.decrement(order.getSessionId(), order.getUserId(), seatIds.size());
+            // 4. 回滚限购计数（只按退款座位数回滚）
+            purchaseLimitService.decrement(order.getSessionId(), order.getUserId(), refundSeatIds.size());
 
-            // 5. 作废票券
-            ticketMapper.invalidateByOrderId(orderId);
+            // 5. 作废退款座位对应的票券（已核销票券保持原状）
+            ticketMapper.invalidateBySeatIds(orderId, refundSeatIds);
 
-            // 6. 订单状态 退款中(3) → 已退款(4)
-            orderMapper.updateStatusFrom(orderId, 3, 4);
+            // 6. 判断全退(4)还是部分退款(5)
+            int totalItems = orderItemMapper.selectByOrderId(orderId).size();
+            int finalStatus = (refundSeatIds.size() == totalItems) ? 4 : 5;
+            orderMapper.updateStatusFrom(orderId, 3, finalStatus);
 
-            log.info("退款完成，orderId={}", orderId);
+            log.info("退款完成，orderId={}，退款座位={}，最终状态={}", orderId, refundSeatIds, finalStatus);
         } catch (Exception e) {
             log.error("退款处理失败，orderId={}，原因：{}", orderId, e.getMessage(), e);
             throw e;

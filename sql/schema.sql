@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS `order` (
     user_id BIGINT NOT NULL COMMENT '用户ID',
     session_id BIGINT NOT NULL COMMENT '场次ID',
     total_amount DECIMAL(10,2) NOT NULL COMMENT '订单总金额',
-    status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=待支付, 1=已支付, 2=已取消, 3=已退款, 4=已过期',
+    status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=待支付, 1=已支付, 2=已取消, 3=退款中, 4=已退款, 5=部分退款',
     pay_time DATETIME DEFAULT NULL COMMENT '支付时间',
     expire_time DATETIME NOT NULL COMMENT '过期时间(下单后5分钟)',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -135,10 +135,11 @@ CREATE TABLE IF NOT EXISTS payment (
 CREATE TABLE IF NOT EXISTS ticket (
     id BIGINT NOT NULL AUTO_INCREMENT,
     order_id BIGINT NOT NULL COMMENT '关联订单ID',
+    seat_id BIGINT NOT NULL COMMENT '关联座位ID',
     user_id BIGINT NOT NULL COMMENT '用户ID',
     qr_code VARCHAR(64) NOT NULL COMMENT '二维码内容(UUID)',
     ticket_no VARCHAR(16) NOT NULL COMMENT '票号(TK+6位随机)',
-    status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=未使用, 1=已使用, 2=已过期',
+    status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=未使用, 1=已使用, 2=已退款/作废',
     verify_time DATETIME DEFAULT NULL COMMENT '核验时间',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -146,6 +147,7 @@ CREATE TABLE IF NOT EXISTS ticket (
     UNIQUE KEY uk_qr_code (qr_code),
     UNIQUE KEY uk_ticket_no (ticket_no),
     KEY idx_order_id (order_id),
+    KEY idx_seat_id (seat_id),
     KEY idx_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='票据表';
 

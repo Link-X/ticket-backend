@@ -51,7 +51,13 @@ public interface TicketMapper {
                                   @Param("verifyTime") LocalDateTime verifyTime);
 
     /**
-     * 按订单 ID 批量作废票券（退款场景）
+     * 按订单 ID 批量作废全部票券
      */
     int invalidateByOrderId(@Param("orderId") Long orderId);
+
+    /**
+     * 按座位 ID 列表作废指定票券（部分退款场景）
+     */
+    int invalidateBySeatIds(@Param("orderId") Long orderId,
+                            @Param("seatIds") List<Long> seatIds);
 }

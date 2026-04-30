@@ -14,11 +14,11 @@
 @userHost  = http://localhost:8082
 
 # 登录后将 token 填到这里
-@token = eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiI3MDQxNzg2NDg1MDA0MDgzMjAiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiaWF0IjoxNzc3MzQ4NDcyLCJleHAiOjE3Nzk5NDA0NzJ9.XFrkPzWuBcgUvrfDGKo-Au--XxIdEE3afM2CYI5rkJjm8EuF2r-xDsi0jrx7dfYa
+@token = eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiI3MDQ5MTQxNDM1NjQwMDk0NzIiLCJ1c2VybmFtZSI6InhkYiIsImlhdCI6MTc3NzUyMzgyOCwiZXhwIjoxNzgwMTE1ODI4fQ.E8dwttWo3o9-tX43LcQAbOYFAQP99xHzFidmXmakJlPHTix__HEv7caOlAYCkFJe
 
 # 后续步骤自动依赖的 ID（从响应中取，手动填入）
-@showId    = 1
-@sessionId = 1
+@showId    = 2
+@sessionId = 2
 @orderNo   = 704179544755671040
 @orderId   = <从 submit 响应 data.orderId 复制>
 @qrCode    = <支付后等票券异步生成，从 Admin 查询 ticket 表取 qrCode>
@@ -54,10 +54,10 @@ POST {{adminHost}}/api/admin/show/create
 Content-Type: application/json
 
 {
-  "name": "五月天演唱会",
-  "description": "2026 年巡回演唱会",
-  "category": "演唱会",
-  "venue": "国家体育场",
+  "name": "大冬天脱口秀",
+  "description": "3028 年巡回脱口秀",
+  "category": "脱口秀",
+  "venue": "乡下体育场",
   "posterUrl": "https://example.com/poster.jpg"
 }
 
@@ -70,11 +70,11 @@ Content-Type: application/json
 
 {
   "showId": {{showId}},
-  "name": "北京场 2026-06-01",
-  "startTime": "2026-06-01T19:00:00",
-  "endTime": "2026-06-01T22:00:00",
+  "name": "上海 3026-06-01",
+  "startTime": "2036-06-01T19:00:00",
+  "endTime": "2023-06-01T22:00:00",
   "totalSeats": 6,
-  "limitPerUser": 2,
+  "limitPerUser": 4,
   "rowCount": 2,
   "colCount": 3
 }
@@ -89,8 +89,8 @@ Content-Type: application/json
 {
   "sessionId": {{sessionId}},
   "areas": [
-    {"areaId": "0", "price": 680.00, "originPrice": 800.00},
-    {"areaId": "1", "price": 1280.00, "originPrice": 1500.00}
+    {"areaId": "0", "price": 20.00, "originPrice": 80.00},
+    {"areaId": "1", "price": 80.00, "originPrice": 150.00}
   ]
 }
 
@@ -104,12 +104,12 @@ Content-Type: application/json
 {
   "sessionId": {{sessionId}},
   "seats": [
-    {"rowNo": 1, "colNo": 1, "type": 1, "areaId": "0", "seatName": "1排01座"},
-    {"rowNo": 1, "colNo": 2, "type": 1, "areaId": "0", "seatName": "1排02座"},
-    {"rowNo": 1, "colNo": 3, "type": 1, "areaId": "0", "seatName": "1排03座"},
-    {"rowNo": 2, "colNo": 1, "type": 1, "areaId": "1", "seatName": "2排01座"},
-    {"rowNo": 2, "colNo": 2, "type": 1, "areaId": "1", "seatName": "2排02座"},
-    {"rowNo": 2, "colNo": 3, "type": 1, "areaId": "1", "seatName": "2排03座"}
+    {"rowNo": 1, "colNo": 1, "type": 1, "areaId": "0", "seatName": "3排01座"},
+    {"rowNo": 1, "colNo": 2, "type": 1, "areaId": "0", "seatName": "3排02座"},
+    {"rowNo": 1, "colNo": 3, "type": 1, "areaId": "0", "seatName": "3排03座"},
+    {"rowNo": 2, "colNo": 1, "type": 1, "areaId": "1", "seatName": "5排01座"},
+    {"rowNo": 2, "colNo": 2, "type": 1, "areaId": "1", "seatName": "6排02座"},
+    {"rowNo": 2, "colNo": 3, "type": 1, "areaId": "1", "seatName": "6排03座"}
   ]
 }
 

@@ -26,6 +26,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -212,26 +213,86 @@ public class OrderService {
     }
 
     /**
-     * 发起退款（已支付订单取消）：同步更新状态为退款中，异步通过 MQ 完成后续退款操作
-     *
-     * @param orderId 订单 ID
+     * 发起退款（已支付订单取消）
+     * - 距演出开始不足1天不允许退款
+     * - 支持部分退款：已核销票券不退，只退未使用票券对应的座位
      */
     public void initiateRefund(Long orderId) {
         Order order = orderMapper.selectById(orderId);
         if (order == null || order.getStatus() != 1) {
             return;
         }
+
+        checkRefundTimeLimit(order);
+
+        List<Ticket> tickets = ticketMapper.selectByOrderId(orderId);
+        List<Long> refundableSeatIds = tickets.stream()
+                .filter(t -> t.getStatus() == 0)
+                .map(Ticket::getSeatId)
+                .collect(Collectors.toList());
+
+        if (refundableSeatIds.isEmpty()) {
+            throw new BusinessException(ErrorCode.REFUND_ALL_TICKETS_USED);
+        }
+
+        doRefund(order, refundableSeatIds);
+    }
+
+    /**
+     * 按票号退单张票
+     * - 订单只有1个座位时等同于整单退款
+     * - 多座位订单只退指定票券对应的座位
+     */
+    public void initiateTicketRefund(String orderNo, String ticketNo, Long userId) {
+        Order order = orderMapper.selectByOrderNo(orderNo);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (order.getStatus() != 1) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "订单状态不允许退款");
+        }
+
+        checkRefundTimeLimit(order);
+
+        Ticket ticket = ticketMapper.selectByTicketNo(ticketNo);
+        if (ticket == null || !ticket.getOrderId().equals(order.getId())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "票券不存在或不属于该订单");
+        }
+        if (ticket.getStatus() == 1) {
+            throw new BusinessException(ErrorCode.TICKET_ALREADY_USED);
+        }
+        if (ticket.getStatus() == 2) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "票券已退款");
+        }
+
+        // 单座位订单退的就是唯一那张票，效果等同整单退款；多座位订单则为部分退款
+        doRefund(order, List.of(ticket.getSeatId()));
+    }
+
+    private void checkRefundTimeLimit(Order order) {
+        ShowSession session = showSessionMapper.selectById(order.getSessionId());
+        if (session != null && session.getStartTime() != null) {
+            long hoursToStart = ChronoUnit.HOURS.between(LocalDateTime.now(), session.getStartTime());
+            if (hoursToStart < 24) {
+                throw new BusinessException(ErrorCode.REFUND_TOO_CLOSE_TO_START);
+            }
+        }
+    }
+
+    private void doRefund(Order order, List<Long> refundSeatIds) {
         // 乐观锁：只有 status=1 才更新为 3（退款中），防止并发重复发起
-        int affected = orderMapper.updateStatusFrom(orderId, 1, 3);
+        int affected = orderMapper.updateStatusFrom(order.getId(), 1, 3);
         if (affected == 0) {
             return;
         }
-        // 立即将座位恢复到 Redis 可售集合，座位图实时生效，无需等待 MQ 异步处理
-        List<OrderItem> items = orderItemMapper.selectByOrderId(orderId);
-        for (OrderItem item : items) {
-            inventoryService.releaseSeat(order.getSessionId(), item.getSeatId());
+        // 立即将可退座位恢复到 Redis 可售集合，座位图实时生效
+        for (Long seatId : refundSeatIds) {
+            inventoryService.releaseSeat(order.getSessionId(), seatId);
         }
-        refundProducer.sendRefund(orderId);
+        refundProducer.sendRefund(order.getId(), refundSeatIds);
     }
 
     /**
