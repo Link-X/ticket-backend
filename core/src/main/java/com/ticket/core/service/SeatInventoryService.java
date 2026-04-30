@@ -53,6 +53,7 @@ public class SeatInventoryService {
             "local userId = ARGV[2]\n" +
             "local ttl = ARGV[3]\n" +
             "local sessionKey = 'session:seats:' .. sessionId\n" +
+            "local lockedCounterKey = 'session:locked:' .. sessionId\n" +
             "local lockedKeys = {}\n" +
             "for i = 4, #ARGV do\n" +
             "  local seatId = ARGV[i]\n" +
@@ -73,6 +74,7 @@ public class SeatInventoryService {
             "  redis.call('EXPIRE', lockKey, ttl)\n" +
             "  table.insert(lockedKeys, lockKey)\n" +
             "end\n" +
+            "redis.call('INCRBY', lockedCounterKey, #ARGV - 3)\n" +
             "return 1"
         );
 
@@ -81,6 +83,10 @@ public class SeatInventoryService {
         RELEASE_SEAT_SCRIPT.setScriptText(
             "redis.call('DEL', KEYS[1])\n" +
             "redis.call('SADD', KEYS[2], ARGV[1])\n" +
+            "local cur = redis.call('GET', KEYS[3])\n" +
+            "if cur and tonumber(cur) > 0 then\n" +
+            "  redis.call('DECR', KEYS[3])\n" +
+            "end\n" +
             "return 1"
         );
 
@@ -89,23 +95,18 @@ public class SeatInventoryService {
         CONSUME_SEAT_SCRIPT.setScriptText(
                 "local sessionKey = KEYS[1]\n" +
                         "local lockKey = KEYS[2]\n" +
+                        "local lockedCounterKey = KEYS[3]\n" +
                         "local seatId = ARGV[1]\n" +
                         "local userId = ARGV[2]\n" +
-                        "\n" +
-                        "-- 检查锁是否存在且属于当前用户\n" +
                         "local lockOwner = redis.call('GET', lockKey)\n" +
-                        "if not lockOwner then\n" +
-                        "    -- 锁不存在，可能已被释放，返回 0\n" +
-                        "    return 0\n" +
-                        "end\n" +
-                        "if lockOwner ~= userId then\n" +
-                        "    -- 锁不属于当前用户，返回 0\n" +
-                        "    return 0\n" +
-                        "end\n" +
-                        "\n" +
-                        "-- 原子执行：从可售集合移除 + 删除锁\n" +
+                        "if not lockOwner then return 0 end\n" +
+                        "if lockOwner ~= userId then return 0 end\n" +
                         "redis.call('SREM', sessionKey, seatId)\n" +
                         "redis.call('DEL', lockKey)\n" +
+                        "local cur = redis.call('GET', lockedCounterKey)\n" +
+                        "if cur and tonumber(cur) > 0 then\n" +
+                        "  redis.call('DECR', lockedCounterKey)\n" +
+                        "end\n" +
                         "return 1\n"
         );
     }
@@ -134,6 +135,11 @@ public class SeatInventoryService {
                         String.valueOf(seat.getId()).getBytes(StandardCharsets.UTF_8));
             }
             connection.expire(sessionKeyBytes, INVENTORY_TTL_SECONDS);
+
+            // 重置锁定计数器（重复预热时清零）
+            byte[] lockedKeyBytes = RedisKeys.sessionLocked(sessionId).getBytes(StandardCharsets.UTF_8);
+            connection.set(lockedKeyBytes, "0".getBytes(StandardCharsets.UTF_8));
+            connection.expire(lockedKeyBytes, INVENTORY_TTL_SECONDS);
 
             // 为每个座位写入 Hash 信息（存 type 和 areaId，不再存 price）
             for (Seat seat : seats) {
@@ -189,9 +195,20 @@ public class SeatInventoryService {
      * @param sessionId 场次 ID
      * @return 可售座位数量
      */
-    public Long getAvailableCount(long sessionId) {
-        String sessionKey = RedisKeys.sessionSeats(sessionId);
-        return redisTemplate.opsForSet().size(sessionKey);
+    public long getAvailableCount(long sessionId) {
+        byte[] sessionKeyBytes = RedisKeys.sessionSeats(sessionId).getBytes(StandardCharsets.UTF_8);
+        byte[] lockedKeyBytes  = RedisKeys.sessionLocked(sessionId).getBytes(StandardCharsets.UTF_8);
+
+        List<Object> results = redisTemplate.executePipelined((RedisConnection conn) -> {
+            conn.sCard(sessionKeyBytes);
+            conn.get(lockedKeyBytes);
+            return null;
+        });
+
+        long total  = results.get(0) instanceof Long  ? (Long) results.get(0) : 0L;
+        String lockedStr = (String) results.get(1);
+        long locked = lockedStr != null ? Long.parseLong(lockedStr) : 0L;
+        return Math.max(0L, total - locked);
     }
 
     /**
@@ -243,13 +260,13 @@ public class SeatInventoryService {
      * @param seatId    座位 ID
      */
     public void releaseSeat(long sessionId, long seatId) {
-        String lockKey = RedisKeys.seatLock(sessionId, seatId);
-        String sessionKey = RedisKeys.sessionSeats(sessionId);
+        String lockKey        = RedisKeys.seatLock(sessionId, seatId);
+        String sessionKey     = RedisKeys.sessionSeats(sessionId);
+        String lockedKey      = RedisKeys.sessionLocked(sessionId);
 
-        // 使用 Lua 脚本原子化执行：删除锁 + 重新加入可售集合，消除竞态窗口
         redisTemplate.execute(
                 RELEASE_SEAT_SCRIPT,
-                Arrays.asList(lockKey, sessionKey),
+                Arrays.asList(lockKey, sessionKey, lockedKey),
                 String.valueOf(seatId)
         );
     }
@@ -265,18 +282,15 @@ public class SeatInventoryService {
      */
     public boolean consumeSeat(long sessionId, long seatId, String userId) {
         String sessionKey = RedisKeys.sessionSeats(sessionId);
-        String lockKey = RedisKeys.seatLock(sessionId, seatId);
+        String lockKey    = RedisKeys.seatLock(sessionId, seatId);
+        String lockedKey  = RedisKeys.sessionLocked(sessionId);
 
         Long result = redisTemplate.execute(
                 CONSUME_SEAT_SCRIPT,
-                Arrays.asList(sessionKey, lockKey),
+                Arrays.asList(sessionKey, lockKey, lockedKey),
                 String.valueOf(seatId), userId
         );
-        if (Long.valueOf(1L).equals(result)) {
-            return true;
-        } else {
-            return false;
-        }
+        return Long.valueOf(1L).equals(result);
     }
 
     /**

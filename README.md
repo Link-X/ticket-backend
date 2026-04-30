@@ -9,7 +9,7 @@
 
 [中文文档](README.zh.md)
 
-A high-concurrency ticket booking backend targeting thousands to tens of thousands of concurrent users. Features show management, seat selection, Redis-based inventory, order timeout cancellation, mock payment, and venue check-in verification. Built with a Maven multi-module architecture for independent deployment.
+A high-concurrency ticket booking backend targeting thousands to tens of thousands of concurrent users. Features show management, seat selection, Redis-based inventory, order timeout cancellation, mock payment, venue check-in verification, and partial refunds. Built with a Maven multi-module architecture for independent deployment.
 
 ---
 
@@ -20,6 +20,7 @@ A high-concurrency ticket booking backend targeting thousands to tens of thousan
 - **Oversell Prevention** — Redis Set atomic `SREM` deduction + DB-level safety check
 - **Order Timeout** — RabbitMQ TTL + dead-letter queue, cancels order and releases inventory exactly 5 minutes after creation
 - **Async Events** — After payment, RabbitMQ Fanout fan-out triggers ticket generation, DB inventory sync, and notification (reserved) in parallel
+- **Refunds** — Full-order and per-ticket refunds; partially-refunded orders (status 5) can continue to refund remaining unused tickets
 - **Annotation Rate Limiting** — `@RateLimit` annotation supports GLOBAL / USER / IP three-dimensional fixed-window rate limiting + blacklist interception
 - **Parameter Validation** — `@Valid` + global exception handler returns unified friendly error messages
 - **Check-in Verification** — Dual-channel: QR code or ticket number
@@ -107,32 +108,80 @@ The default profile is `dev`. Database password is `root123`. Edit each module's
 
 ### User Service (:8082)
 
+#### Auth
+
 | Method | Path | Description | Auth |
 |--------|------|-------------|:----:|
 | POST | `/api/auth/register` | Register | ✗ |
 | POST | `/api/auth/login` | Login, returns JWT | ✗ |
-| GET  | `/api/show/list` | List published shows | ✗ |
-| GET  | `/api/show/{id}/sessions` | List sessions | ✗ |
-| GET  | `/api/show/session/{id}/seats` | Available seat map (with real-time status) | ✗ |
+
+#### Shows
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|:----:|
+| POST | `/api/show/list` | Published show list (paginated, filterable by name / category / venue) | ✗ |
+| GET  | `/api/show/{id}` | Show detail | ✗ |
+
+#### Sessions
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|:----:|
+| POST | `/api/session/list` | Session list (paginated, filterable by status / startTime / endTime) | ✗ |
+| POST | `/api/session/detail` | Session seat map (area prices + real-time availability) | ✗ |
+
+#### Orders
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|:----:|
 | POST | `/api/order/submit` | Lock seats + create order, returns full order immediately | ✓ |
-| GET  | `/api/order/{id}` | Order detail (owner only) | ✓ |
-| GET  | `/api/order/list` | My orders (supports date range filter + pagination) | ✓ |
+| POST | `/api/order/cancel` | Cancel order (unpaid: sync cancel; paid / partial-refund: initiate refund) | ✓ |
+| GET  | `/api/order/orderDetails` | Order detail (owner only) | ✓ |
+| POST | `/api/order/refundTicket` | Refund a single ticket (works on paid or partially-refunded orders) | ✓ |
+| POST | `/api/order/list` | My orders (paginated, filterable by status / date range) | ✓ |
+
+#### Payment & Verification
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|:----:|
 | POST | `/api/payment/create` | Pay order | ✓ |
-| GET  | `/api/verify/qr/{qrCode}` | Verify by QR code | ✗ |
-| GET  | `/api/verify/ticket/{ticketNo}` | Verify by ticket number | ✗ |
+| POST | `/api/verify/qr` | Verify by QR code | ✗ |
+| POST | `/api/verify/ticket` | Verify by ticket number | ✗ |
+
+---
 
 ### Admin Service (:8081)
+
+#### Shows & Sessions
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/admin/show/create` | Create show |
 | PUT  | `/api/admin/show/update` | Update show |
+| GET  | `/api/admin/show/{id}` | Show detail |
+| GET  | `/api/admin/show/list` | Show list |
 | POST | `/api/admin/session/create` | Create session |
-| PUT  | `/api/admin/session/{id}/publish` | Publish session for sale |
+| PUT  | `/api/admin/session/update` | Update session |
+| GET  | `/api/admin/session/{id}` | Session detail |
+| GET  | `/api/admin/session/list` | Session list |
+| PUT  | `/api/admin/session/{sessionId}/publish` | Publish session for sale |
+
+#### Seats
+
+| Method | Path | Description |
+|--------|------|-------------|
 | POST | `/api/admin/seat/batch` | Batch create seats |
+| GET  | `/api/admin/seat/list` | Seat list |
 | POST | `/api/admin/seat/area/save` | Save price area |
+| GET  | `/api/admin/seat/area/list` | Price area list |
 | POST | `/api/admin/seat/warmup/{sessionId}` | Warm up seat inventory into Redis |
-| GET  | `/api/admin/order/{id}` | Get order |
+
+#### Orders & Monitor
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET  | `/api/admin/order/{id}` | Order detail |
+| GET  | `/api/admin/order/query` | Order query |
+| GET  | `/api/admin/order/{id}/items` | Order line items |
 | GET  | `/api/admin/monitor/dashboard` | Real-time available seat count |
 
 ---
@@ -155,7 +204,7 @@ User submits seat selection
 User clicks Pay on       No payment within 5 min
   confirmation page          │
     │                   Timeout message routed via DLX
-POST /payment/create    to order.cancel.queue
+POST /api/payment/create to order.cancel.queue
     │                       │
     ├─ Create payment record Cancel order
     ├─ Order status → PAID  Release Redis inventory
@@ -167,6 +216,40 @@ Generate   Sync DB    Send notification
 Tickets   inventory   (reserved)
 (async)    (async)
 ```
+
+---
+
+## Refund Flow
+
+```
+Order status: 1 (PAID) or 5 (PARTIAL_REFUND)
+    │
+    ├─ Full cancel  POST /api/order/cancel
+    │       └─ Find all unused tickets → doRefund → status → REFUNDING (3)
+    │
+    └─ Per-ticket   POST /api/order/refundTicket
+            └─ Validate ticket is unused → doRefund → status → REFUNDING (3)
+                        │
+              MQ consumer processes refund result
+                        │
+            ┌───────────┴───────────┐
+            │                       │
+    Unused tickets remain       All tickets refunded
+    status → PARTIAL_REFUND (5) status → REFUNDED (4)
+```
+
+---
+
+## Order Status Reference
+
+| Status | Meaning |
+|:------:|---------|
+| 0 | Pending payment |
+| 1 | Paid |
+| 2 | Cancelled |
+| 3 | Refunding |
+| 4 | Refunded |
+| 5 | Partially refunded |
 
 ---
 
@@ -191,10 +274,10 @@ Payment Success (Fanout):
 Stack `@RateLimit` annotations on any Controller method — AOP intercepts automatically, no business code changes needed:
 
 ```java
-@RateLimit(type = LimitType.BLACKLIST)                                       // blacklist check
-@RateLimit(type = LimitType.IP,     limit = 20,  window = 60)               // IP: 20 per 60s
-@RateLimit(type = LimitType.USER,   limit = 5,   window = 60)               // User: 5 per 60s
-@RateLimit(type = LimitType.GLOBAL, limit = 50,  window = 1,  message = "System busy") // Global: 50/s
+@RateLimit(type = LimitType.BLACKLIST)
+@RateLimit(type = LimitType.IP,     limit = 20,  window = 60)
+@RateLimit(type = LimitType.USER,   limit = 5,   window = 60)
+@RateLimit(type = LimitType.GLOBAL, limit = 50,  window = 1,  message = "System busy")
 @PostMapping("/submit")
 public Result<?> submit(...) { }
 ```

@@ -9,7 +9,7 @@
 
 [English](README.md)
 
-面向千～万级并发场景的抢票系统后端，支持演出管理、选座购票、Redis 库存管理、订单超时自动取消、Mock 支付与入场核验。采用 Maven 多模块架构，各模块独立部署。
+面向千～万级并发场景的抢票系统后端，支持演出管理、选座购票、Redis 库存管理、订单超时自动取消、Mock 支付、入场核验及部分退款。采用 Maven 多模块架构，各模块独立部署。
 
 ---
 
@@ -20,6 +20,7 @@
 - **防超卖**：Redis Set 原子扣库存，DB 层二次校验兜底
 - **订单超时**：RabbitMQ TTL + 死信队列，5 分钟精准触发取消并释放库存
 - **异步事件**：支付成功后通过 RabbitMQ Fanout 并行触发票券生成、DB 库存同步、通知（预留）
+- **退款**：支持整单退款与单票退款；已部分退款订单（状态 5）可继续退剩余未使用票
 - **注解限流**：`@RateLimit` 注解支持全局 / 用户 / IP 三维度固定窗口限流 + 黑名单拦截
 - **参数校验**：`@Valid` + 全局异常处理，统一返回友好错误信息
 - **入场核验**：支持二维码 / 票号双通道核销
@@ -107,32 +108,80 @@ mvn spring-boot:run -pl user
 
 ### 用户端（:8082）
 
+#### 认证
+
 | 方法 | 路径 | 说明 | 登录 |
 |------|------|------|:----:|
 | POST | `/api/auth/register` | 注册 | ✗ |
 | POST | `/api/auth/login` | 登录，返回 JWT | ✗ |
-| GET  | `/api/show/list` | 上架演出列表 | ✗ |
-| GET  | `/api/show/{id}/sessions` | 场次列表 | ✗ |
-| GET  | `/api/show/session/{id}/seats` | 可售座位图（含实时状态） | ✗ |
+
+#### 演出
+
+| 方法 | 路径 | 说明 | 登录 |
+|------|------|------|:----:|
+| POST | `/api/show/list` | 演出列表（分页，支持 name / category / venue 筛选） | ✗ |
+| GET  | `/api/show/{id}` | 演出详情 | ✗ |
+
+#### 场次
+
+| 方法 | 路径 | 说明 | 登录 |
+|------|------|------|:----:|
+| POST | `/api/session/list` | 场次列表（分页，支持 status / startTime / endTime 筛选） | ✗ |
+| POST | `/api/session/detail` | 场次座位图（含区域价格 + 实时可售状态） | ✗ |
+
+#### 订单
+
+| 方法 | 路径 | 说明 | 登录 |
+|------|------|------|:----:|
 | POST | `/api/order/submit` | 锁座 + 建单，直接返回完整订单 | ✓ |
-| GET  | `/api/order/{id}` | 订单详情（仅限本人） | ✓ |
-| GET  | `/api/order/list` | 我的订单（支持日期范围筛选、分页） | ✓ |
+| POST | `/api/order/cancel` | 取消订单（未支付直接取消；已支付 / 部分退款则发起退款） | ✓ |
+| GET  | `/api/order/orderDetails` | 订单详情（仅限本人） | ✓ |
+| POST | `/api/order/refundTicket` | 单票退款（支持已支付 / 部分退款订单） | ✓ |
+| POST | `/api/order/list` | 我的订单（分页，支持 status / 日期范围筛选） | ✓ |
+
+#### 支付 & 核验
+
+| 方法 | 路径 | 说明 | 登录 |
+|------|------|------|:----:|
 | POST | `/api/payment/create` | 支付订单 | ✓ |
-| GET  | `/api/verify/qr/{qrCode}` | 二维码核验 | ✗ |
-| GET  | `/api/verify/ticket/{ticketNo}` | 票号核验 | ✗ |
+| POST | `/api/verify/qr` | 二维码核验入场 | ✗ |
+| POST | `/api/verify/ticket` | 票号核验入场 | ✗ |
+
+---
 
 ### 管理端（:8081）
+
+#### 演出 & 场次
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/admin/show/create` | 创建演出 |
 | PUT  | `/api/admin/show/update` | 更新演出 |
+| GET  | `/api/admin/show/{id}` | 演出详情 |
+| GET  | `/api/admin/show/list` | 演出列表 |
 | POST | `/api/admin/session/create` | 创建场次 |
-| PUT  | `/api/admin/session/{id}/publish` | 发布场次开售 |
+| PUT  | `/api/admin/session/update` | 更新场次 |
+| GET  | `/api/admin/session/{id}` | 场次详情 |
+| GET  | `/api/admin/session/list` | 场次列表 |
+| PUT  | `/api/admin/session/{sessionId}/publish` | 发布场次开售 |
+
+#### 座位
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
 | POST | `/api/admin/seat/batch` | 批量创建座位 |
+| GET  | `/api/admin/seat/list` | 座位列表 |
 | POST | `/api/admin/seat/area/save` | 保存价格区域 |
+| GET  | `/api/admin/seat/area/list` | 价格区域列表 |
 | POST | `/api/admin/seat/warmup/{sessionId}` | 预热座位库存到 Redis |
-| GET  | `/api/admin/order/{id}` | 查询订单 |
+
+#### 订单 & 监控
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/admin/order/{id}` | 订单详情 |
+| GET  | `/api/admin/order/query` | 订单查询 |
+| GET  | `/api/admin/order/{id}/items` | 订单明细 |
 | GET  | `/api/admin/monitor/dashboard` | 实时可售座位数 |
 
 ---
@@ -148,16 +197,16 @@ mvn spring-boot:run -pl user
     ├─ Lua 批量锁座（任一失败全量回滚）
     ├─ 同步建单（DB INSERT）
     ├─ 发送超时消息到 RabbitMQ（TTL = 5 分钟）
-    └─ 直接返回完整订单信息（含演出/场次/座位/总价/倒计时）
+    └─ 直接返回完整订单信息（含演出 / 场次 / 座位 / 总价 / 倒计时）
                 │
     ┌───────────┴───────────┐
     │                       │
 用户在确认页点击支付      5 分钟内未支付
     │                       │
-POST /payment/create     超时消息经死信路由
-    │                  到 order.cancel.queue
+POST /api/payment/create  超时消息经死信路由
+    │                  至 order.cancel.queue
     ├─ 创建支付记录         │
-    ├─ 订单状态改为已支付   取消订单
+    ├─ 订单状态 → 已支付    取消订单
     └─ 发送支付成功事件     释放 Redis 库存
               │             回滚限购计数
     ┌─────────┼──────────┐
@@ -165,6 +214,40 @@ POST /payment/create     超时消息经死信路由
 生成票券   同步DB库存   发送通知
 （异步）   （异步）    （预留）
 ```
+
+---
+
+## 退款流程
+
+```
+订单状态 1（已支付）或 5（部分退款）
+    │
+    ├─ 整单取消 POST /api/order/cancel
+    │       └─ 查询所有未使用票 → doRefund → 状态 → 退款中(3)
+    │
+    └─ 单票退款 POST /api/order/refundTicket
+            └─ 校验票状态未使用 → doRefund → 状态 → 退款中(3)
+                        │
+              MQ 消费者处理退款结果
+                        │
+            ┌───────────┴───────────┐
+            │                       │
+      仍有未退票             所有票已退
+   状态 → 部分退款(5)      状态 → 已退款(4)
+```
+
+---
+
+## 订单状态说明
+
+| 状态值 | 含义 |
+|:------:|------|
+| 0 | 待支付 |
+| 1 | 已支付 |
+| 2 | 已取消 |
+| 3 | 退款中 |
+| 4 | 已退款 |
+| 5 | 部分退款 |
 
 ---
 
@@ -189,10 +272,10 @@ POST /payment/create     超时消息经死信路由
 在任意 Controller 方法上叠加 `@RateLimit` 注解，AOP 自动拦截，无需侵入业务代码：
 
 ```java
-@RateLimit(type = LimitType.BLACKLIST)                                       // 黑名单检查
-@RateLimit(type = LimitType.IP,     limit = 20,  window = 60)               // IP：60秒内20次
-@RateLimit(type = LimitType.USER,   limit = 5,   window = 60)               // 用户：60秒内5次
-@RateLimit(type = LimitType.GLOBAL, limit = 50,  window = 1,  message = "系统繁忙") // 全局：每秒50次
+@RateLimit(type = LimitType.BLACKLIST)
+@RateLimit(type = LimitType.IP,     limit = 20,  window = 60)
+@RateLimit(type = LimitType.USER,   limit = 5,   window = 60)
+@RateLimit(type = LimitType.GLOBAL, limit = 50,  window = 1,  message = "系统繁忙")
 @PostMapping("/submit")
 public Result<?> submit(...) { }
 ```
@@ -224,7 +307,7 @@ public Result<?> submit(...) { }
 | Key | 类型 | 说明 | TTL |
 |-----|------|------|-----|
 | `session:seats:{sessionId}` | Set | 可售座位 ID 集合 | 7 天 |
-| `seat:info:{seatId}` | Hash | 座位详情（行/列/类型/区域） | 7 天 |
+| `seat:info:{seatId}` | Hash | 座位详情（行 / 列 / 类型 / 区域） | 7 天 |
 | `seat:lock:{sessionId}:{seatId}` | String | 座位锁（value = userId） | 5 分钟 |
 | `session:purchase:{sessionId}:{userId}` | String | 用户已购数量 | 7 天 |
 | `session:area:price:{sessionId}:{areaId}` | Hash | 区域价格缓存 | 7 天 |

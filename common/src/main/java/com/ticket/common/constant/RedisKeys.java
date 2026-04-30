@@ -45,6 +45,11 @@ public class RedisKeys {
         return "session:lock:" + sessionId;
     }
 
+    /** 场次当前锁定中（结账中）的座位数量计数器 */
+    public static String sessionLocked(long sessionId) {
+        return "session:locked:" + sessionId;
+    }
+
     /** 场次内某区域的价格信息 Hash（字段: price, originPrice） */
     public static String seatAreaPrice(long sessionId, String areaId) {
         return "session:area:price:" + sessionId + ":" + areaId;
