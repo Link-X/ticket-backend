@@ -20,6 +20,9 @@ import com.ticket.core.mapper.TicketMapper;
 import com.ticket.core.mq.producer.OrderTimeoutProducer;
 import com.ticket.core.mq.producer.RefundProducer;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -76,6 +79,7 @@ public class OrderService {
      * @param request 订单创建请求（userId、sessionId、seatIds）
      * @return 创建成功的 Order 对象
      */
+    @Transactional(rollbackFor = Exception.class)
     public Order createOrder(OrderCreateRequest request) {
         Long sessionId = request.getSessionId();
         Long userId = request.getUserId();
@@ -152,7 +156,6 @@ public class OrderService {
         order.setUpdateTime(LocalDateTime.now());
 
         orderMapper.insert(order);
-        orderTimeoutProducer.sendTimeoutMessage(order.getId());
 
         // 5. 批量插入 OrderItem
         for (OrderItem item : items) {
@@ -160,10 +163,19 @@ public class OrderService {
         }
         orderItemMapper.batchInsert(items);
 
-        // 6. 消费座位：从可售集合移除 + 删除锁（与 submit 时的 batchLockSeats 对应）
-        for (Long seatId : seatIds) {
-            inventoryService.consumeSeat(sessionId, seatId, String.valueOf(userId));
-        }
+        // 事务提交后再执行 Redis 消费座位 + 发超时 MQ
+        // 确保 DB 回滚时 Redis 不会被修改，避免座位被误标为"已售"
+        Long orderId = order.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                // 6. 消费座位：从可售集合移除 + 删除锁
+                for (Long seatId : seatIds) {
+                    inventoryService.consumeSeat(sessionId, seatId, String.valueOf(userId));
+                }
+                orderTimeoutProducer.sendTimeoutMessage(orderId);
+            }
+        });
 
         return order;
     }
