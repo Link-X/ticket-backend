@@ -8,6 +8,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 
 import java.util.stream.Collectors;
 
@@ -34,6 +35,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public Result<?> handleNotReadable(HttpMessageNotReadableException e) {
         return Result.fail(ErrorCode.PARAM_ERROR.getCode(), "请求体不能为空，请检查 Content-Type 是否为 application/json");
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public Result<?> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        String supported = e.getSupportedHttpMethods() != null
+                ? e.getSupportedHttpMethods().toString()
+                : "未知";
+        return Result.fail(ErrorCode.PARAM_ERROR.getCode(),
+                "不支持 " + e.getMethod() + " 请求，该接口仅支持 " + supported);
     }
 
     @ExceptionHandler(BusinessException.class)

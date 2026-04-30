@@ -13,6 +13,7 @@ import com.ticket.core.service.PurchaseLimitService;
 import com.ticket.core.service.SeatInventoryService;
 import com.ticket.core.service.ShowService;
 import lombok.extern.slf4j.Slf4j;
+import com.ticket.user.dto.CancelOrderRequest;
 import com.ticket.user.dto.OrderListRequest;
 import com.ticket.user.dto.SubmitOrderRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -80,9 +81,9 @@ public class OrderController {
     }
 
     @PostMapping("/cancel")
-    public Result<Void> cancel(@RequestParam String orderNo) {
+    public Result<Void> cancel(@Valid @RequestBody CancelOrderRequest req) {
         Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        Order order = orderService.getByOrderNo(orderNo);
+        Order order = orderService.getByOrderNo(req.getOrderNo());
         if (order == null) {
             throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
         }
