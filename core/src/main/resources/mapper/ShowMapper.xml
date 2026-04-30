@@ -58,4 +58,29 @@
         ORDER BY create_time DESC
     </select>
 
+
+    <select id="selectByCondition" resultMap="ShowResultMap">
+        SELECT id, name, description, category, poster_url, venue, status, create_time, update_time
+        FROM `show`
+        <where>
+            <if test="status != null">AND status = #{status}</if>
+            <if test="name != null and name != ''">AND name LIKE CONCAT('%', #{name}, '%')</if>
+            <if test="category != null and category != ''">AND category LIKE CONCAT('%', #{category}, '%')</if>
+            <if test="venue != null and venue != ''">AND venue LIKE CONCAT('%', #{venue}, '%')</if>
+        </where>
+        ORDER BY create_time DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countByCondition" resultType="int">
+        SELECT COUNT(*)
+        FROM `show`
+        <where>
+            <if test="status != null">AND status = #{status}</if>
+            <if test="name != null and name != ''">AND name LIKE CONCAT('%', #{name}, '%')</if>
+            <if test="category != null and category != ''">AND category LIKE CONCAT('%', #{category}, '%')</if>
+            <if test="venue != null and venue != ''">AND venue LIKE CONCAT('%', #{venue}, '%')</if>
+        </where>
+    </select>
+
 </mapper>

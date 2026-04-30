@@ -1,10 +1,12 @@
 package com.ticket.user.controller;
 
 import com.ticket.common.result.Result;
-import com.ticket.core.domain.vo.SessionSeatResponse;
 import com.ticket.core.service.ShowService;
 import com.ticket.user.config.NoLogin;
+import com.ticket.user.dto.ShowListRequest;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 @NoLogin
 @RestController
@@ -17,9 +19,11 @@ public class ShowController {
         this.showService = showService;
     }
 
-    @GetMapping("/list")
-    public Result<?> listShows() {
-        return Result.success(showService.listShows(1));
+    @PostMapping("/list")
+    public Result<?> listShows(@RequestBody ShowListRequest req) {
+        var list = showService.listShowsPaged(req.getName(), req.getCategory(), req.getVenue(), req.getPage(), req.getSize());
+        var total = showService.countShows(req.getName(), req.getCategory(), req.getVenue());
+        return Result.success(Map.of("total", total, "list", list));
     }
 
     @GetMapping("/{id}")
@@ -27,16 +31,5 @@ public class ShowController {
         return Result.success(showService.getShow(id));
     }
 
-    @GetMapping("/{id}/sessions")
-    public Result<?> listSessions(@PathVariable Long id) {
-        return Result.success(showService.listSessions(id));
-    }
 
-    /**
-     * 获取场次座位图（含价格区域列表 + 网格化座位信息）
-     */
-    @GetMapping("/session/seats")
-    public Result<SessionSeatResponse> getSessionSeats(@RequestParam Long sessionId) {
-        return Result.success(showService.getSeatSection(sessionId));
-    }
 }

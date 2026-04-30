@@ -219,7 +219,7 @@ public class OrderService {
      */
     public void initiateRefund(Long orderId) {
         Order order = orderMapper.selectById(orderId);
-        if (order == null || order.getStatus() != 1) {
+        if (order == null || (order.getStatus() != 1 && order.getStatus() != 5)) {
             return;
         }
 
@@ -251,7 +251,7 @@ public class OrderService {
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
-        if (order.getStatus() != 1) {
+        if (order.getStatus() != 1 && order.getStatus() != 5) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "订单状态不允许退款");
         }
 
@@ -283,8 +283,8 @@ public class OrderService {
     }
 
     private void doRefund(Order order, List<Long> refundSeatIds) {
-        // 乐观锁：只有 status=1 才更新为 3（退款中），防止并发重复发起
-        int affected = orderMapper.updateStatusFrom(order.getId(), 1, 3);
+        // 乐观锁：status=1（已支付）或 status=5（部分退款）才更新为 3（退款中），防止并发重复发起
+        int affected = orderMapper.updateStatusFrom(order.getId(), order.getStatus(), 3);
         if (affected == 0) {
             return;
         }

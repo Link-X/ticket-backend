@@ -88,6 +88,15 @@ public class ShowService {
         return showMapper.selectAll();
     }
 
+    public List<Show> listShowsPaged(String name, String category, String venue, int page, int size) {
+        int offset = (page - 1) * size;
+        return showMapper.selectByCondition(name, category, venue, 1, offset, size);
+    }
+
+    public int countShows(String name, String category, String venue) {
+        return showMapper.countByCondition(name, category, venue, 1);
+    }
+
     /**
      * 创建场次
      * 设置 status=0，insert，返回 session
@@ -122,6 +131,17 @@ public class ShowService {
      */
     public List<ShowSession> listSessions(Long showId) {
         return showSessionMapper.selectByShowId(showId);
+    }
+
+    public List<ShowSession> listSessionsPaged(Long showId, Integer status,
+                                               LocalDateTime startTime, LocalDateTime endTime,
+                                               int page, int size) {
+        int offset = (page - 1) * size;
+        return showSessionMapper.selectByCondition(showId, status, startTime, endTime, offset, size);
+    }
+
+    public int countSessions(Long showId, Integer status, LocalDateTime startTime, LocalDateTime endTime) {
+        return showSessionMapper.countByCondition(showId, status, startTime, endTime);
     }
 
     /**
