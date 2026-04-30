@@ -16,6 +16,7 @@ A high-concurrency ticket booking backend targeting thousands to tens of thousan
 ## Features
 
 - **Show Management** — CRUD for shows / sessions / seats; admin warms up seat inventory into Redis with one click
+- **Venue Templates** — Define seat layout and default prices once on a room; sessions created with a `roomId` auto-copy all seats and price areas instantly
 - **Booking Core** — Lua atomic purchase-limit check + Redis batch seat lock (full rollback on any failure) + synchronous order creation
 - **Oversell Prevention** — Redis Set atomic `SREM` deduction + DB-level safety check
 - **Order Timeout** — RabbitMQ TTL + dead-letter queue, cancels order and releases inventory exactly 5 minutes after creation
@@ -102,6 +103,15 @@ mvn spring-boot:run -pl user
 
 The default profile is `dev`. Database password is `root123`. Edit each module's `application-dev.yml` to change.
 
+### 4. Seed load-test data (optional)
+
+```bash
+# Requires jq: brew install jq
+bash docs/seed-data.sh
+```
+
+Creates 1 venue template (20 × 20 seats, VIP front section), 5 shows, 15 sessions, then publishes and warms up all sessions into Redis. Total: 6 000 bookable seats ready for load testing.
+
 ---
 
 ## API Overview
@@ -151,6 +161,21 @@ The default profile is `dev`. Database password is `root123`. Edit each module's
 
 ### Admin Service (:8081)
 
+#### Venue Templates (Room Management)
+
+Define the seat layout and default prices on a room once; specifying `roomId` when creating a session automatically copies all seats and price areas.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/admin/room/create` | Create room |
+| PUT  | `/api/admin/room/update` | Update room |
+| GET  | `/api/admin/room/{id}` | Room detail |
+| GET  | `/api/admin/room/list` | Room list |
+| POST | `/api/admin/room/seat/batch` | Save room seat template (overwrite) |
+| GET  | `/api/admin/room/seat/list?roomId=` | Room seat template list |
+| POST | `/api/admin/room/area/save` | Save room default price areas (overwrite) |
+| GET  | `/api/admin/room/area/list?roomId=` | Room default price area list |
+
 #### Shows & Sessions
 
 | Method | Path | Description |
@@ -159,20 +184,20 @@ The default profile is `dev`. Database password is `root123`. Edit each module's
 | PUT  | `/api/admin/show/update` | Update show |
 | GET  | `/api/admin/show/{id}` | Show detail |
 | GET  | `/api/admin/show/list` | Show list |
-| POST | `/api/admin/session/create` | Create session |
+| POST | `/api/admin/session/create` | Create session (pass `roomId` to auto-copy seats + prices) |
 | PUT  | `/api/admin/session/update` | Update session |
 | GET  | `/api/admin/session/{id}` | Session detail |
-| GET  | `/api/admin/session/list` | Session list |
+| GET  | `/api/admin/session/list?showId=` | Session list |
 | PUT  | `/api/admin/session/{sessionId}/publish` | Publish session for sale |
 
-#### Seats
+#### Seats (Manual — use when no room template)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/admin/seat/batch` | Batch create seats |
-| GET  | `/api/admin/seat/list` | Seat list |
-| POST | `/api/admin/seat/area/save` | Save price area |
-| GET  | `/api/admin/seat/area/list` | Price area list |
+| GET  | `/api/admin/seat/list?sessionId=` | Seat list |
+| POST | `/api/admin/seat/area/save` | Save session price areas |
+| GET  | `/api/admin/seat/area/list?sessionId=` | Session price area list |
 | POST | `/api/admin/seat/warmup/{sessionId}` | Warm up seat inventory into Redis |
 
 #### Orders & Monitor
@@ -182,7 +207,7 @@ The default profile is `dev`. Database password is `root123`. Edit each module's
 | GET  | `/api/admin/order/{id}` | Order detail |
 | GET  | `/api/admin/order/query` | Order query |
 | GET  | `/api/admin/order/{id}/items` | Order line items |
-| GET  | `/api/admin/monitor/dashboard` | Real-time available seat count |
+| GET  | `/api/admin/monitor/dashboard?sessionId=` | Real-time seat counts (total / available / sold) |
 
 ---
 
@@ -288,19 +313,23 @@ public Result<?> submit(...) { }
 
 ## Database Design
 
-9 tables in total:
+13 tables in total:
 
 | Table | Description |
 |-------|-------------|
 | `user` | Users, BCrypt passwords |
 | `user_role` | Roles: USER / ADMIN |
 | `show` | Shows |
-| `show_session` | Sessions, includes `limit_per_user` |
+| `show_session` | Sessions; `room_id` links the venue template; `limit_per_user` cap |
 | `seat` | Seat master table; real-time inventory lives in Redis, `status` synced async after payment |
+| `seat_area` | Per-session seat price areas |
 | `order` | Orders; index `idx_status_expire` |
 | `order_item` | Order lines with price snapshot |
 | `payment` | Payment records |
 | `ticket` | Tickets with 8-char friendly ticket number (excludes O/0/I/1) + UUID QR code |
+| `room` | Venue template (name, dimensions) |
+| `room_seat` | Seat layout template for a room |
+| `room_area` | Default price areas for a room (copied to `seat_area` on session creation) |
 
 ---
 
@@ -313,6 +342,7 @@ public Result<?> submit(...) { }
 | `seat:lock:{sessionId}:{seatId}` | String | Seat lock (value = userId) | 5 min |
 | `session:purchase:{sessionId}:{userId}` | String | Per-user purchase count | 7 days |
 | `session:area:price:{sessionId}:{areaId}` | Hash | Area price cache | 7 days |
+| `session:locked:{sessionId}` | String | Count of seats currently locked in checkout | 7 days |
 | `rate:global:{method}:{window}` | String | Global rate-limit counter | dynamic |
 | `rate:user:{userId}:{method}:{window}` | String | User rate-limit counter | dynamic |
 | `rate:ip:{ip}:{method}:{window}` | String | IP rate-limit counter | dynamic |

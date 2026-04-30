@@ -16,6 +16,7 @@
 ## 功能特性
 
 - **演出管理**：演出 / 场次 / 座位 CRUD；管理端一键预热座位库存到 Redis
+- **场地模板**：在 Room 上一次性定义座位布局和默认价格；创建场次时传入 `roomId`，座位和价格区域自动复制
 - **抢票核心**：Lua 原子限购检查 + Redis 批量锁座（任一失败全量回滚）+ 同步建单
 - **防超卖**：Redis Set 原子扣库存，DB 层二次校验兜底
 - **订单超时**：RabbitMQ TTL + 死信队列，5 分钟精准触发取消并释放库存
@@ -102,6 +103,15 @@ mvn spring-boot:run -pl user
 
 默认使用 `dev` profile，数据库密码为 `root123`，可在各模块 `application-dev.yml` 中修改。
 
+### 4. 生成压测数据（可选）
+
+```bash
+# 依赖 jq：brew install jq
+bash docs/seed-data.sh
+```
+
+自动创建 1 个场地模板（20×20 座位，前 10 行 VIP 区）、5 个演出、15 个场次，并全部发布和预热到 Redis。共 6 000 个可售座位，可直接用于压测。
+
 ---
 
 ## API 概览
@@ -151,6 +161,21 @@ mvn spring-boot:run -pl user
 
 ### 管理端（:8081）
 
+#### 场地模板（Room 管理）
+
+在 Room 上一次性定义座位布局和默认价格；创建场次时指定 `roomId`，座位和价格区域自动复制。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/admin/room/create` | 创建场地 |
+| PUT  | `/api/admin/room/update` | 更新场地 |
+| GET  | `/api/admin/room/{id}` | 场地详情 |
+| GET  | `/api/admin/room/list` | 场地列表 |
+| POST | `/api/admin/room/seat/batch` | 保存场地座位模板（覆盖写） |
+| GET  | `/api/admin/room/seat/list?roomId=` | 场地座位模板列表 |
+| POST | `/api/admin/room/area/save` | 保存场地默认价格区域（覆盖写） |
+| GET  | `/api/admin/room/area/list?roomId=` | 场地默认价格区域列表 |
+
 #### 演出 & 场次
 
 | 方法 | 路径 | 说明 |
@@ -159,20 +184,20 @@ mvn spring-boot:run -pl user
 | PUT  | `/api/admin/show/update` | 更新演出 |
 | GET  | `/api/admin/show/{id}` | 演出详情 |
 | GET  | `/api/admin/show/list` | 演出列表 |
-| POST | `/api/admin/session/create` | 创建场次 |
+| POST | `/api/admin/session/create` | 创建场次（传入 `roomId` 自动复制座位 + 价格） |
 | PUT  | `/api/admin/session/update` | 更新场次 |
 | GET  | `/api/admin/session/{id}` | 场次详情 |
-| GET  | `/api/admin/session/list` | 场次列表 |
+| GET  | `/api/admin/session/list?showId=` | 场次列表 |
 | PUT  | `/api/admin/session/{sessionId}/publish` | 发布场次开售 |
 
-#### 座位
+#### 座位（手动创建——无场地模板时使用）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/admin/seat/batch` | 批量创建座位 |
-| GET  | `/api/admin/seat/list` | 座位列表 |
-| POST | `/api/admin/seat/area/save` | 保存价格区域 |
-| GET  | `/api/admin/seat/area/list` | 价格区域列表 |
+| GET  | `/api/admin/seat/list?sessionId=` | 座位列表 |
+| POST | `/api/admin/seat/area/save` | 保存场次价格区域 |
+| GET  | `/api/admin/seat/area/list?sessionId=` | 场次价格区域列表 |
 | POST | `/api/admin/seat/warmup/{sessionId}` | 预热座位库存到 Redis |
 
 #### 订单 & 监控
@@ -182,7 +207,7 @@ mvn spring-boot:run -pl user
 | GET  | `/api/admin/order/{id}` | 订单详情 |
 | GET  | `/api/admin/order/query` | 订单查询 |
 | GET  | `/api/admin/order/{id}/items` | 订单明细 |
-| GET  | `/api/admin/monitor/dashboard` | 实时可售座位数 |
+| GET  | `/api/admin/monitor/dashboard?sessionId=` | 实时座位统计（总数 / 可售 / 已售） |
 
 ---
 
@@ -286,19 +311,23 @@ public Result<?> submit(...) { }
 
 ## 数据库设计
 
-共 9 张表：
+共 13 张表：
 
 | 表名 | 说明 |
 |------|------|
 | `user` | 用户，BCrypt 密码 |
 | `user_role` | 用户角色（USER / ADMIN） |
 | `show` | 演出 |
-| `show_session` | 场次，含限购数 `limit_per_user` |
+| `show_session` | 场次；`room_id` 关联场地模板；含限购数 `limit_per_user` |
 | `seat` | 座位底表，实时库存由 Redis 管理，支付后异步同步 status |
+| `seat_area` | 场次座位价格区域 |
 | `order` | 订单，索引 `idx_status_expire` |
 | `order_item` | 订单行，含价格快照 |
 | `payment` | 支付记录 |
 | `ticket` | 票券，8 位友好票号（排除 O/0/I/1）+ UUID 二维码 |
+| `room` | 场地模板（名称、行列数等） |
+| `room_seat` | 场地座位布局模板 |
+| `room_area` | 场地默认价格区域（创建场次时复制到 `seat_area`） |
 
 ---
 
@@ -311,6 +340,7 @@ public Result<?> submit(...) { }
 | `seat:lock:{sessionId}:{seatId}` | String | 座位锁（value = userId） | 5 分钟 |
 | `session:purchase:{sessionId}:{userId}` | String | 用户已购数量 | 7 天 |
 | `session:area:price:{sessionId}:{areaId}` | Hash | 区域价格缓存 | 7 天 |
+| `session:locked:{sessionId}` | String | 当前正在结算中（已锁座未支付）的座位数量 | 7 天 |
 | `rate:global:{method}:{window}` | String | 全局限流计数 | 动态 |
 | `rate:user:{userId}:{method}:{window}` | String | 用户限流计数 | 动态 |
 | `rate:ip:{ip}:{method}:{window}` | String | IP 限流计数 | 动态 |
