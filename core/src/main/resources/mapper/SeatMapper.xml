@@ -60,4 +60,17 @@
         </foreach>
     </update>
 
+    <update id="batchUpdatePairSeatId">
+        UPDATE seat
+        SET pair_seat_id = CASE id
+        <foreach collection="seats" item="seat">
+            WHEN #{seat.id} THEN #{seat.pairSeatId}
+        </foreach>
+        END
+        WHERE id IN
+        <foreach collection="seats" item="seat" open="(" separator="," close=")">
+            #{seat.id}
+        </foreach>
+    </update>
+
 </mapper>

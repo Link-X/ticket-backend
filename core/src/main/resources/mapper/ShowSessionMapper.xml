@@ -7,6 +7,7 @@
     <resultMap id="ShowSessionResultMap" type="com.ticket.core.domain.entity.ShowSession">
         <id     column="id"            property="id"/>
         <result column="show_id"       property="showId"/>
+        <result column="room_id"       property="roomId"/>
         <result column="name"          property="name"/>
         <result column="start_time"    property="startTime"/>
         <result column="end_time"      property="endTime"/>
@@ -20,14 +21,15 @@
     </resultMap>
 
     <insert id="insert" parameterType="com.ticket.core.domain.entity.ShowSession" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO show_session (show_id, name, start_time, end_time, total_seats, limit_per_user, status, row_count, col_count, create_time, update_time)
-        VALUES (#{showId}, #{name}, #{startTime}, #{endTime}, #{totalSeats}, #{limitPerUser}, #{status},
+        INSERT INTO show_session (show_id, room_id, name, start_time, end_time, total_seats, limit_per_user, status, row_count, col_count, create_time, update_time)
+        VALUES (#{showId}, #{roomId}, #{name}, #{startTime}, #{endTime}, #{totalSeats}, #{limitPerUser}, #{status},
                 #{rowCount}, #{colCount}, #{createTime}, #{updateTime})
     </insert>
 
     <update id="update" parameterType="com.ticket.core.domain.entity.ShowSession">
         UPDATE show_session
         SET show_id        = #{showId},
+            room_id        = #{roomId},
             name           = #{name},
             start_time     = #{startTime},
             end_time       = #{endTime},
@@ -41,13 +43,13 @@
     </update>
 
     <select id="selectById" resultMap="ShowSessionResultMap">
-        SELECT id, show_id, name, start_time, end_time, total_seats, limit_per_user, status,
+        SELECT id, show_id, room_id, name, start_time, end_time, total_seats, limit_per_user, status,
                row_count, col_count, create_time, update_time
         FROM show_session WHERE id = #{id}
     </select>
 
     <select id="selectByShowId" resultMap="ShowSessionResultMap">
-        SELECT id, show_id, name, start_time, end_time, total_seats, limit_per_user, status,
+        SELECT id, show_id, room_id, name, start_time, end_time, total_seats, limit_per_user, status,
                row_count, col_count, create_time, update_time
         FROM show_session WHERE show_id = #{showId}
         ORDER BY start_time ASC
@@ -55,7 +57,7 @@
 
 
     <select id="selectByCondition" resultMap="ShowSessionResultMap">
-        SELECT id, show_id, name, start_time, end_time, total_seats, limit_per_user, status,
+        SELECT id, show_id, room_id, name, start_time, end_time, total_seats, limit_per_user, status,
                row_count, col_count, create_time, update_time
         FROM show_session
         <where>

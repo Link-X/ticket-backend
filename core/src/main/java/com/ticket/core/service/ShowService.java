@@ -14,6 +14,7 @@ import com.ticket.core.mapper.SeatMapper;
 import com.ticket.core.mapper.ShowMapper;
 import com.ticket.core.mapper.ShowSessionMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -32,6 +33,7 @@ public class ShowService {
     private final SeatMapper seatMapper;
     private final SeatAreaMapper seatAreaMapper;
     private final SeatInventoryService inventoryService;
+    private final RoomService roomService;
 
     /**
      * 构造器注入
@@ -40,12 +42,14 @@ public class ShowService {
                        ShowSessionMapper showSessionMapper,
                        SeatMapper seatMapper,
                        SeatAreaMapper seatAreaMapper,
-                       SeatInventoryService inventoryService) {
+                       SeatInventoryService inventoryService,
+                       RoomService roomService) {
         this.showMapper = showMapper;
         this.showSessionMapper = showSessionMapper;
         this.seatMapper = seatMapper;
         this.seatAreaMapper = seatAreaMapper;
         this.inventoryService = inventoryService;
+        this.roomService = roomService;
     }
 
     /**
@@ -101,12 +105,18 @@ public class ShowService {
      * 创建场次
      * 设置 status=0，insert，返回 session
      */
+    @Transactional(rollbackFor = Exception.class)
     public ShowSession createSession(ShowSession showSession) {
         LocalDateTime now = LocalDateTime.now();
         showSession.setStatus(0);
         showSession.setCreateTime(now);
         showSession.setUpdateTime(now);
         showSessionMapper.insert(showSession);
+
+        // 如果指定了场地，自动复制座位模板和默认价格区域
+        if (showSession.getRoomId() != null) {
+            roomService.copyToSession(showSession.getRoomId(), showSession.getId());
+        }
         return showSession;
     }
 

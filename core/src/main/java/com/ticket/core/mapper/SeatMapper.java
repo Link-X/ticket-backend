@@ -41,4 +41,9 @@ public interface SeatMapper {
      * 批量更新座位状态
      */
     int batchUpdateStatus(@Param("ids") List<Long> ids, @Param("status") Integer status);
+
+    /**
+     * 批量更新情侣座配对 ID（从场地模板复制后二次修正）
+     */
+    int batchUpdatePairSeatId(@Param("seats") List<Seat> seats);
 }

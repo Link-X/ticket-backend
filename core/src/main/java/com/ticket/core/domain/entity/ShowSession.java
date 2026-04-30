@@ -10,6 +10,8 @@ import java.time.LocalDateTime;
 public class ShowSession {
     private Long id;
     private Long showId;
+    /** 关联场地ID，不为空时座位由场地模板自动复制 */
+    private Long roomId;
     private String name;
     private LocalDateTime startTime;
     private LocalDateTime endTime;

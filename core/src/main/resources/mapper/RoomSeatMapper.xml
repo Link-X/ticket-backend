@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.ticket.core.mapper.RoomSeatMapper">
+
+    <resultMap id="RoomSeatResultMap" type="com.ticket.core.domain.entity.RoomSeat">
+        <id     column="id"           property="id"/>
+        <result column="room_id"      property="roomId"/>
+        <result column="row_no"       property="rowNo"/>
+        <result column="col_no"       property="colNo"/>
+        <result column="type"         property="type"/>
+        <result column="area_id"      property="areaId"/>
+        <result column="seat_name"    property="seatName"/>
+        <result column="pair_seat_id" property="pairSeatId"/>
+    </resultMap>
+
+    <insert id="batchInsert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO room_seat (room_id, row_no, col_no, type, area_id, seat_name, pair_seat_id)
+        VALUES
+        <foreach collection="seats" item="s" separator=",">
+            (#{s.roomId}, #{s.rowNo}, #{s.colNo}, #{s.type}, #{s.areaId}, #{s.seatName}, #{s.pairSeatId})
+        </foreach>
+    </insert>
+
+    <select id="selectByRoomId" resultMap="RoomSeatResultMap">
+        SELECT id, room_id, row_no, col_no, type, area_id, seat_name, pair_seat_id
+        FROM room_seat WHERE room_id = #{roomId}
+        ORDER BY row_no, col_no
+    </select>
+
+    <delete id="deleteByRoomId">
+        DELETE FROM room_seat WHERE room_id = #{roomId}
+    </delete>
+
+</mapper>

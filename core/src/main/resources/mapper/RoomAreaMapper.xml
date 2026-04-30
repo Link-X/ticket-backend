@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.ticket.core.mapper.RoomAreaMapper">
+
+    <resultMap id="RoomAreaResultMap" type="com.ticket.core.domain.entity.RoomArea">
+        <id     column="id"                   property="id"/>
+        <result column="room_id"              property="roomId"/>
+        <result column="area_id"              property="areaId"/>
+        <result column="default_price"        property="defaultPrice"/>
+        <result column="default_origin_price" property="defaultOriginPrice"/>
+    </resultMap>
+
+    <insert id="batchInsert">
+        INSERT INTO room_area (room_id, area_id, default_price, default_origin_price)
+        VALUES
+        <foreach collection="areas" item="a" separator=",">
+            (#{a.roomId}, #{a.areaId}, #{a.defaultPrice}, #{a.defaultOriginPrice})
+        </foreach>
+    </insert>
+
+    <select id="selectByRoomId" resultMap="RoomAreaResultMap">
+        SELECT id, room_id, area_id, default_price, default_origin_price
+        FROM room_area WHERE room_id = #{roomId}
+    </select>
+
+    <delete id="deleteByRoomId">
+        DELETE FROM room_area WHERE room_id = #{roomId}
+    </delete>
+
+</mapper>

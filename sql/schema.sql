@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS `show` (
 CREATE TABLE IF NOT EXISTS show_session (
     id             BIGINT       NOT NULL AUTO_INCREMENT,
     show_id        BIGINT       NOT NULL COMMENT '关联演出ID',
+    room_id        BIGINT       DEFAULT NULL COMMENT '关联场地ID，不为空时座位由场地模板复制',
     name           VARCHAR(128) NOT NULL COMMENT '场次名称',
     start_time     DATETIME     NOT NULL COMMENT '开始时间',
     end_time       DATETIME     NOT NULL COMMENT '结束时间',
@@ -164,3 +165,47 @@ CREATE TABLE IF NOT EXISTS seat_area (
     KEY idx_session_id (session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='座位价格区域表';
 
+-- 11. 场地表（座位布局模板载体）
+CREATE TABLE IF NOT EXISTS room (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    name        VARCHAR(128) NOT NULL COMMENT '场地名称，如「主场地」「小剧场」',
+    venue       VARCHAR(256) NOT NULL COMMENT '所属场馆名称',
+    row_count   INT          NOT NULL DEFAULT 0 COMMENT '座位网格行数',
+    col_count   INT          NOT NULL DEFAULT 0 COMMENT '座位网格列数',
+    description VARCHAR(512) DEFAULT NULL COMMENT '备注',
+    create_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='场地表';
+
+-- 12. 场地座位模板表
+CREATE TABLE IF NOT EXISTS room_seat (
+    id           BIGINT      NOT NULL AUTO_INCREMENT,
+    room_id      BIGINT      NOT NULL COMMENT '关联场地ID',
+    row_no       INT         NOT NULL COMMENT '排号',
+    col_no       INT         NOT NULL COMMENT '列号',
+    type         INT         NOT NULL DEFAULT 1 COMMENT '座位类型: 1=普通, 2=情侣左, 3=情侣右',
+    area_id      VARCHAR(32) NOT NULL DEFAULT '' COMMENT '默认价格区域ID',
+    seat_name    VARCHAR(64) DEFAULT NULL COMMENT '座位名称，如 1排01座',
+    pair_seat_id BIGINT      DEFAULT NULL COMMENT '情侣连座配对座位ID（room_seat.id）',
+    PRIMARY KEY (id),
+    KEY idx_room_id (room_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='场地座位模板表';
+
+-- 13. 场地默认价格区域表
+CREATE TABLE IF NOT EXISTS room_area (
+    id                BIGINT       NOT NULL AUTO_INCREMENT,
+    room_id           BIGINT       NOT NULL COMMENT '关联场地ID',
+    area_id           VARCHAR(32)  NOT NULL COMMENT '区域标识，与 room_seat.area_id 对应',
+    default_price     DECIMAL(10,2) NOT NULL COMMENT '默认售价',
+    default_origin_price DECIMAL(10,2) NOT NULL COMMENT '默认原价',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_room_area (room_id, area_id),
+    KEY idx_room_id (room_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='场地默认价格区域表';
+
+-- ============================================================
+-- 存量数据库迁移（仅首次升级时执行，新建库忽略）
+-- ============================================================
+-- ALTER TABLE show_session ADD COLUMN room_id BIGINT DEFAULT NULL
+--     COMMENT '关联场地ID，不为空时座位由场地模板复制' AFTER show_id;
