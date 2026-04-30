@@ -52,9 +52,16 @@ public class SeatInventoryService {
             "local sessionId = ARGV[1]\n" +
             "local userId = ARGV[2]\n" +
             "local ttl = ARGV[3]\n" +
+            "local sessionKey = 'session:seats:' .. sessionId\n" +
             "local lockedKeys = {}\n" +
             "for i = 4, #ARGV do\n" +
             "  local seatId = ARGV[i]\n" +
+            "  if redis.call('SISMEMBER', sessionKey, seatId) == 0 then\n" +
+            "    for _, k in ipairs(lockedKeys) do\n" +
+            "      redis.call('DEL', k)\n" +
+            "    end\n" +
+            "    return 0\n" +
+            "  end\n" +
             "  local lockKey = 'seat:lock:' .. sessionId .. ':' .. seatId\n" +
             "  local ok = redis.call('SETNX', lockKey, userId)\n" +
             "  if ok == 0 then\n" +
