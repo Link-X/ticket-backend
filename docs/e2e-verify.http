@@ -126,9 +126,15 @@ PUT {{adminHost}}/api/admin/session/{{sessionId}}/publish
 POST {{adminHost}}/api/admin/seat/warmup/{{sessionId}}
 
 ###
-# Step 9: 用户端查看上架演出列表
-# 预期: {"code":200,"data":[{"id":1,"name":"五月天演唱会",...}]}
-GET {{userHost}}/api/show/list
+# Step 9: 用户端查看上架演出列表（分页，支持 name/category/venue 筛选）
+# 预期: {"code":200,"data":{"total":1,"list":[{"id":1,"name":"大冬天脱口秀",...}]}}
+POST {{userHost}}/api/show/list
+Content-Type: application/json
+
+{
+  "page": 1,
+  "size": 10
+}
 
 ###
 # Step 10: 查看场次座位图（含价格区域和网格化座位信息）
@@ -137,15 +143,15 @@ GET {{userHost}}/api/show/list
 #   "code": 200,
 #   "data": {
 #     "areaPriceList": [
-#       {"areaId":"0","price":"680.00","originPrice":"800.00"},
-#       {"areaId":"1","price":"1280.00","originPrice":"1500.00"}
+#       {"areaId":"0","price":"20.00","originPrice":"80.00"},
+#       {"areaId":"1","price":"80.00","originPrice":"150.00"}
 #     ],
 #     "seatSection": {
 #       "rowCount": 2,
 #       "columnCount": 3,
 #       "seatRows": [
 #         {"rowsId":"1","rowsNum":"1","columns":[
-#           {"colId":"1","colNum":"1","seatName":"1排01座","type":1,"areaId":"0","status":0},
+#           {"colId":"1","colNum":"1","seatName":"3排01座","type":1,"areaId":"0","status":0},
 #           ...
 #         ]},
 #         ...
@@ -153,7 +159,12 @@ GET {{userHost}}/api/show/list
 #     }
 #   }
 # }
-GET {{userHost}}/api/show/session/seats?sessionId={{sessionId}}
+POST {{userHost}}/api/session/detail
+Content-Type: application/json
+
+{
+  "sessionId": {{sessionId}}
+}
 
 ###
 # Step 11: 提交购票请求（同步锁座 + 建单）
@@ -190,8 +201,13 @@ Authorization: Bearer {{token}}
 # 同步执行：MySQL order.status → 2(已取消)，Redis 座位恢复可售，限购计数 -1
 # 预期: {"code":200,"data":null}
 # 错误场景: 订单已支付/已取消 → {"code":400,"message":"当前订单状态不可取消"}
-POST {{userHost}}/api/order/cancel?orderNo={{orderNo}}
+POST {{userHost}}/api/order/cancel
+Content-Type: application/json
 Authorization: Bearer {{token}}
+
+{
+  "orderNo": "{{orderNo}}"
+}
 
 ###
 # Step 11.2: 查询订单详情（验证 IDOR 防护：只能查自己的订单）
@@ -217,7 +233,7 @@ Authorization: Bearer {{token}}
 }
 
 ###
-# Step 12.1: 取消已支付订单（退款，status=1）
+# Step 12.1: 取消已支付订单（退款，status=1 或 status=5 部分退款均可）
 # 同步：MySQL order.status → 3(退款中)，立即返回
 # 异步（RabbitMQ refund.queue）：
 #     - Payment status → 2(已退款)
@@ -229,11 +245,21 @@ Authorization: Bearer {{token}}
 # 预期: {"code":200,"data":null}
 # 可通过 Step 11.2 轮询订单状态，status=4 表示退款完成
 # 错误场景: 订单不存在 → {"code":1005}，非本人订单 → {"code":403}
-POST {{userHost}}/api/order/cancel?orderNo={{orderNo}}
+POST {{userHost}}/api/order/cancel
+Content-Type: application/json
 Authorization: Bearer {{token}}
+
+{
+  "orderNo": "{{orderNo}}"
+}
 
 ###
 # Step 13: 入场核验（扫码核销）
 # qrCode 从 ticket 表 qr_code 字段取（支付成功后异步生成，通常毫秒级完成）
 # 预期: {"code":200,"data":{"id":...,"status":1,"verifyTime":"..."}}
-GET {{userHost}}/api/verify/qr/{{qrCode}}
+POST {{userHost}}/api/verify/qr
+Content-Type: application/json
+
+{
+  "qrCode": "{{qrCode}}"
+}
