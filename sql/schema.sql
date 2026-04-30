@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS `show` (
     status INT NOT NULL DEFAULT 0 COMMENT '状态: 0=草稿, 1=已上架, 2=已下架',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id)
+    PRIMARY KEY (id),
+    KEY idx_status_create_time (status, create_time) COMMENT '用于演出列表按状态分页查询，避免 filesort'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='演出表';
 
 -- 4. 演出场次表
