@@ -13,13 +13,12 @@ import com.ticket.core.service.PurchaseLimitService;
 import com.ticket.core.service.SeatInventoryService;
 import com.ticket.core.service.ShowService;
 import lombok.extern.slf4j.Slf4j;
+import com.ticket.user.dto.OrderListRequest;
 import com.ticket.user.dto.SubmitOrderRequest;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -115,15 +114,12 @@ public class OrderController {
         return Result.success(orderService.buildStatusResponse(order));
     }
 
-    @GetMapping("/list")
-    public Result<?> list(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
+    @PostMapping("/list")
+    public Result<?> list(@RequestBody OrderListRequest req) {
         Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        List<OrderStatusResponse> orders = orderService.getUserOrders(userId, page, size, startTime, endTime);
-        int total = orderService.countUserOrders(userId, startTime, endTime);
+        List<OrderStatusResponse> orders = orderService.getUserOrders(
+                userId, req.getPage(), req.getSize(), req.getStatus(), req.getStartTime(), req.getEndTime());
+        int total = orderService.countUserOrders(userId, req.getStatus(), req.getStartTime(), req.getEndTime());
         return Result.success(Map.of("total", total, "list", orders));
     }
 }

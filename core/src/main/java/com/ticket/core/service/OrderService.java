@@ -267,17 +267,18 @@ public class OrderService {
      * @return 订单响应列表
      */
     public List<OrderStatusResponse> getUserOrders(Long userId, int page, int size,
+                                                   Integer status,
                                                    LocalDateTime startTime, LocalDateTime endTime) {
         int offset = (page - 1) * size;
-        List<Order> orders = orderMapper.selectByUserId(userId, offset, size, startTime, endTime);
+        List<Order> orders = orderMapper.selectByUserId(userId, offset, size, status, startTime, endTime);
         return orders.stream().map(this::buildStatusResponse).collect(Collectors.toList());
     }
 
     /**
      * 统计用户订单总数
      */
-    public int countUserOrders(Long userId, LocalDateTime startTime, LocalDateTime endTime) {
-        return orderMapper.countByUserId(userId, startTime, endTime);
+    public int countUserOrders(Long userId, Integer status, LocalDateTime startTime, LocalDateTime endTime) {
+        return orderMapper.countByUserId(userId, status, startTime, endTime);
     }
 
     public OrderStatusResponse buildStatusResponse(Order order) {

@@ -61,13 +61,15 @@ public interface OrderMapper {
     List<Order> selectByUserId(@Param("userId") Long userId,
                                @Param("offset") int offset,
                                @Param("limit") int limit,
+                               @Param("status") Integer status,
                                @Param("startTime") LocalDateTime startTime,
                                @Param("endTime") LocalDateTime endTime);
 
     /**
-     * 统计用户订单总数，startTime/endTime 可选
+     * 统计用户订单总数，status/startTime/endTime 可选
      */
     int countByUserId(@Param("userId") Long userId,
+                      @Param("status") Integer status,
                       @Param("startTime") LocalDateTime startTime,
                       @Param("endTime") LocalDateTime endTime);
 }
