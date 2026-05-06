@@ -60,4 +60,9 @@ public interface TicketMapper {
      */
     int invalidateBySeatIds(@Param("orderId") Long orderId,
                             @Param("seatIds") List<Long> seatIds);
+
+    /**
+     * 批量查询多个订单的票券（IN 查询，避免 N+1）
+     */
+    List<Ticket> selectByOrderIds(@Param("orderIds") List<Long> orderIds);
 }

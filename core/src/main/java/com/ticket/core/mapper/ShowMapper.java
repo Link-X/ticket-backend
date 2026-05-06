@@ -53,4 +53,9 @@ public interface ShowMapper {
                          @org.apache.ibatis.annotations.Param("category") String category,
                          @org.apache.ibatis.annotations.Param("venue") String venue,
                          @org.apache.ibatis.annotations.Param("status") Integer status);
+
+    /**
+     * 按 ID 列表批量查询演出（IN 查询，避免 N+1）
+     */
+    List<Show> selectByIds(@org.apache.ibatis.annotations.Param("ids") List<Long> ids);
 }

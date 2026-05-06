@@ -23,6 +23,10 @@ spring:
           max-attempts: 3
           initial-interval: 2000ms
 
+snowflake:
+  worker-id: 1
+  data-center-id: 1
+
 logging:
   level:
     com.ticket: DEBUG

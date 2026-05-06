@@ -19,6 +19,7 @@ import com.ticket.core.mapper.ShowSessionMapper;
 import com.ticket.core.mapper.TicketMapper;
 import com.ticket.core.mq.producer.OrderTimeoutProducer;
 import com.ticket.core.mq.producer.RefundProducer;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -37,6 +38,7 @@ import java.util.stream.Collectors;
 /**
  * 订单服务 — 负责创建订单、取消订单及查询订单信息
  */
+@Slf4j
 @Service
 public class OrderService {
 
@@ -50,7 +52,7 @@ public class OrderService {
     private final OrderTimeoutProducer orderTimeoutProducer;
     private final RefundProducer refundProducer;
     private final TicketMapper ticketMapper;
-    private final SnowflakeIdGenerator snowflake = new SnowflakeIdGenerator(1, 1);
+    private final SnowflakeIdGenerator snowflake;
 
     public OrderService(OrderMapper orderMapper,
                         OrderItemMapper orderItemMapper,
@@ -61,7 +63,8 @@ public class OrderService {
                         ShowSessionMapper showSessionMapper,
                         OrderTimeoutProducer orderTimeoutProducer,
                         RefundProducer refundProducer,
-                        TicketMapper ticketMapper) {
+                        TicketMapper ticketMapper,
+                        SnowflakeIdGenerator snowflake) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.inventoryService = inventoryService;
@@ -72,6 +75,7 @@ public class OrderService {
         this.orderTimeoutProducer = orderTimeoutProducer;
         this.refundProducer = refundProducer;
         this.ticketMapper = ticketMapper;
+        this.snowflake = snowflake;
     }
 
     /**
@@ -186,6 +190,7 @@ public class OrderService {
      *
      * @param orderId 订单 ID
      */
+    @Transactional(rollbackFor = Exception.class)
     public void cancelOrder(Long orderId) {
         // 1. 查询订单
         Order order = orderMapper.selectById(orderId);
@@ -292,7 +297,15 @@ public class OrderService {
         for (Long seatId : refundSeatIds) {
             inventoryService.releaseSeat(order.getSessionId(), seatId);
         }
-        refundProducer.sendRefund(order.getId(), refundSeatIds);
+        try {
+            refundProducer.sendRefund(order.getId(), refundSeatIds);
+        } catch (Exception e) {
+            // MQ 发送失败：回滚 DB 状态（3 → 原状态），防止订单卡死在"退款中"
+            // Redis 座位已释放，此处不再回锁（5 分钟 TTL 后自动清理，用户可重新发起退款）
+            log.error("退款 MQ 发送失败，回滚订单状态，orderId={}", order.getId(), e);
+            orderMapper.updateStatusFrom(order.getId(), 3, order.getStatus());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "退款系统繁忙，请稍后重试");
+        }
     }
 
     /**
@@ -332,7 +345,31 @@ public class OrderService {
                                                    LocalDateTime startTime, LocalDateTime endTime) {
         int offset = (page - 1) * size;
         List<Order> orders = orderMapper.selectByUserId(userId, offset, size, status, startTime, endTime);
-        return orders.stream().map(this::buildStatusResponse).collect(Collectors.toList());
+        if (orders.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> orderIds = orders.stream().map(Order::getId).collect(Collectors.toList());
+        List<Long> sessionIds = orders.stream().map(Order::getSessionId).distinct().collect(Collectors.toList());
+
+        // 4 次批量查询替代 N*4 次单查
+        Map<Long, List<OrderItem>> itemsByOrderId = orderItemMapper.selectByOrderIds(orderIds)
+                .stream().collect(Collectors.groupingBy(OrderItem::getOrderId));
+
+        List<ShowSession> sessions = showSessionMapper.selectByIds(sessionIds);
+        Map<Long, ShowSession> sessionsById = sessions.stream()
+                .collect(Collectors.toMap(ShowSession::getId, s -> s));
+
+        List<Long> showIds = sessions.stream().map(ShowSession::getShowId).distinct().collect(Collectors.toList());
+        Map<Long, Show> showsById = showMapper.selectByIds(showIds)
+                .stream().collect(Collectors.toMap(Show::getId, s -> s));
+
+        Map<Long, List<Ticket>> ticketsByOrderId = ticketMapper.selectByOrderIds(orderIds)
+                .stream().collect(Collectors.groupingBy(Ticket::getOrderId));
+
+        return orders.stream()
+                .map(o -> buildStatusResponse(o, itemsByOrderId, sessionsById, showsById, ticketsByOrderId))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -340,6 +377,50 @@ public class OrderService {
      */
     public int countUserOrders(Long userId, Integer status, LocalDateTime startTime, LocalDateTime endTime) {
         return orderMapper.countByUserId(userId, status, startTime, endTime);
+    }
+
+    /**
+     * 批量构建订单状态响应（供 getUserOrders 使用，所有关联数据已预取）
+     */
+    private OrderStatusResponse buildStatusResponse(
+            Order order,
+            Map<Long, List<OrderItem>> itemsByOrderId,
+            Map<Long, ShowSession> sessionsById,
+            Map<Long, Show> showsById,
+            Map<Long, List<Ticket>> ticketsByOrderId) {
+
+        List<OrderItem> items = itemsByOrderId.getOrDefault(order.getId(), List.of());
+        ShowSession session = sessionsById.get(order.getSessionId());
+        Show show = session != null ? showsById.get(session.getShowId()) : null;
+        List<Ticket> tickets = ticketsByOrderId.getOrDefault(order.getId(), List.of());
+
+        OrderStatusResponse resp = new OrderStatusResponse();
+        resp.setOrderId(order.getId());
+        resp.setOrderNo(order.getOrderNo());
+        resp.setStatus(order.getStatus());
+        resp.setTotalAmount(order.getTotalAmount());
+        resp.setCreateTime(order.getCreateTime());
+        resp.setPayTime(order.getPayTime());
+        resp.setExpireTime(order.getExpireTime());
+        resp.setSeatInfos(items.stream().map(OrderItem::getSeatInfo).collect(Collectors.toList()));
+        if (show != null) {
+            resp.setShowName(show.getName());
+            resp.setShowVenue(show.getVenue());
+        }
+        if (session != null) {
+            resp.setSessionName(session.getName());
+            resp.setSessionStartTime(session.getStartTime());
+        }
+        resp.setTickets(tickets.stream().map(t -> {
+            OrderStatusResponse.TicketInfo info = new OrderStatusResponse.TicketInfo();
+            info.setTicketNo(t.getTicketNo());
+            info.setQrCode(t.getQrCode());
+            info.setStatus(t.getStatus());
+            info.setVerifyTime(t.getVerifyTime());
+            return info;
+        }).collect(Collectors.toList()));
+
+        return resp;
     }
 
     public OrderStatusResponse buildStatusResponse(Order order) {

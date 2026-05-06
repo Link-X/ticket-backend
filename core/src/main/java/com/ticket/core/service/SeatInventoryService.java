@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -305,7 +306,7 @@ public class SeatInventoryService {
     }
 
     /**
-     * 批量查询座位实时状态
+     * 批量查询座位实时状态（Pipeline SISMEMBER，只查所需座位，不拉全量集合）
      * 规则：不在可售集合 → 2(已售)；在可售集合且有锁 → 1(已锁)；否则 → 0(可售)
      *
      * @param sessionId 场次 ID
@@ -313,37 +314,52 @@ public class SeatInventoryService {
      * @return Map<seatId, status>
      */
     public Map<Long, Integer> batchGetSeatStatus(long sessionId, List<Long> seatIds) {
-        Set<String> availableSet = getAvailableSeatIds(sessionId);
-
-        // 找出在可售集合中的座位，需要进一步检查是否被锁
-        List<Long> inAvailable = new ArrayList<>();
-        for (Long seatId : seatIds) {
-            if (availableSet != null && availableSet.contains(String.valueOf(seatId))) {
-                inAvailable.add(seatId);
-            }
+        if (seatIds.isEmpty()) {
+            return new HashMap<>();
         }
 
-        // Pipeline 批量 EXISTS 检查锁 key
-        List<Object> existsResults = redisTemplate.executePipelined((RedisConnection connection) -> {
-            for (Long seatId : inAvailable) {
-                String lockKey = RedisKeys.seatLock(sessionId, seatId);
-                connection.exists(lockKey.getBytes(StandardCharsets.UTF_8));
+        byte[] sessionKeyBytes = RedisKeys.sessionSeats(sessionId).getBytes(StandardCharsets.UTF_8);
+
+        // Pipeline SISMEMBER：只检查所需座位是否在可售集合，不拉全量
+        List<Object> isMemberResults = redisTemplate.executePipelined((RedisConnection conn) -> {
+            for (Long seatId : seatIds) {
+                conn.sIsMember(sessionKeyBytes,
+                        String.valueOf(seatId).getBytes(StandardCharsets.UTF_8));
             }
             return null;
         });
 
-        // 组装锁状态 Map
+        // 找出在可售集合中的座位，需进一步检查是否被锁
+        List<Long> inAvailable = new ArrayList<>();
+        for (int i = 0; i < seatIds.size(); i++) {
+            Object r = isMemberResults.get(i);
+            if (Boolean.TRUE.equals(r) || (r instanceof Long && (Long) r > 0)) {
+                inAvailable.add(seatIds.get(i));
+            }
+        }
+
+        // Pipeline EXISTS：检查可售座位中哪些被锁
         Map<Long, Boolean> lockedMap = new HashMap<>();
-        for (int i = 0; i < inAvailable.size(); i++) {
-            Object result = existsResults.get(i);
-            boolean locked = Boolean.TRUE.equals(result) || (result instanceof Long && (Long) result > 0);
-            lockedMap.put(inAvailable.get(i), locked);
+        if (!inAvailable.isEmpty()) {
+            List<Object> existsResults = redisTemplate.executePipelined((RedisConnection conn) -> {
+                for (Long seatId : inAvailable) {
+                    conn.exists(RedisKeys.seatLock(sessionId, seatId)
+                            .getBytes(StandardCharsets.UTF_8));
+                }
+                return null;
+            });
+            for (int i = 0; i < inAvailable.size(); i++) {
+                Object r = existsResults.get(i);
+                boolean locked = Boolean.TRUE.equals(r) || (r instanceof Long && (Long) r > 0);
+                lockedMap.put(inAvailable.get(i), locked);
+            }
         }
 
         // 组装最终状态 Map
+        Set<Long> availableSet = new HashSet<>(inAvailable);
         Map<Long, Integer> statusMap = new HashMap<>();
         for (Long seatId : seatIds) {
-            if (availableSet == null || !availableSet.contains(String.valueOf(seatId))) {
+            if (!availableSet.contains(seatId)) {
                 statusMap.put(seatId, 2); // 已售
             } else if (Boolean.TRUE.equals(lockedMap.get(seatId))) {
                 statusMap.put(seatId, 1); // 已锁

@@ -24,15 +24,16 @@ public class PaymentService {
     private final OrderMapper orderMapper;
     private final PaymentMapper paymentMapper;
     private final PaymentGatewayFactory gatewayFactory;
-
-    private final SnowflakeIdGenerator snowflake = new SnowflakeIdGenerator(1, 3);
+    private final SnowflakeIdGenerator snowflake;
 
     public PaymentService(OrderMapper orderMapper,
                           PaymentMapper paymentMapper,
-                          PaymentGatewayFactory gatewayFactory) {
+                          PaymentGatewayFactory gatewayFactory,
+                          SnowflakeIdGenerator snowflake) {
         this.orderMapper = orderMapper;
         this.paymentMapper = paymentMapper;
         this.gatewayFactory = gatewayFactory;
+        this.snowflake = snowflake;
     }
 
     /**
@@ -72,7 +73,13 @@ public class PaymentService {
             payment.setTradeNo("TRADE-" + System.currentTimeMillis());
             payment.setCallbackTime(LocalDateTime.now());
             paymentMapper.updateStatus(payment.getId(), 1);
-            orderMapper.updateStatusAndPayTime(orderId, 1, LocalDateTime.now());
+            int affected = orderMapper.updateStatusAndPayTime(orderId, 1, LocalDateTime.now());
+            if (affected == 0) {
+                log.warn("支付成功但订单已取消，orderId={} paymentNo={}", orderId, paymentNo);
+                paymentMapper.updateStatus(payment.getId(), 2);
+                payment.setStatus(2);
+                return payment;
+            }
             log.info("支付成功 orderId={} paymentNo={}", orderId, paymentNo);
         } else {
             payment.setStatus(2);

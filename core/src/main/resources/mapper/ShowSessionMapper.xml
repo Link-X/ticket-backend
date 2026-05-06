@@ -81,4 +81,15 @@
         </where>
     </select>
 
+    <!-- 按 ID 列表批量查询场次（IN 查询，避免 N+1） -->
+    <select id="selectByIds" resultMap="ShowSessionResultMap">
+        SELECT id, show_id, room_id, name, start_time, end_time, total_seats, limit_per_user, status,
+               row_count, col_count, create_time, update_time
+        FROM show_session
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
 </mapper>

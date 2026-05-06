@@ -26,8 +26,7 @@ import java.util.Map;
 @RequestMapping("/api/auth")
 public class AuthController {
 
-    private final SnowflakeIdGenerator snowflake = new SnowflakeIdGenerator(1, 4);
-
+    private final SnowflakeIdGenerator snowflake;
     private final UserMapper userMapper;
     private final UserRoleMapper userRoleMapper;
     private final PasswordEncoder passwordEncoder;
@@ -36,11 +35,13 @@ public class AuthController {
     public AuthController(UserMapper userMapper,
                           UserRoleMapper userRoleMapper,
                           PasswordEncoder passwordEncoder,
-                          JwtTokenProvider jwtTokenProvider) {
+                          JwtTokenProvider jwtTokenProvider,
+                          SnowflakeIdGenerator snowflake) {
         this.userMapper = userMapper;
         this.userRoleMapper = userRoleMapper;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.snowflake = snowflake;
     }
 
     @RateLimit(type = LimitType.BLACKLIST)

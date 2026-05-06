@@ -38,4 +38,9 @@ public interface OrderItemMapper {
      * 返回字段：session_id, user_id, seat_count
      */
     List<Map<String, Object>> selectActiveSeatCounts();
+
+    /**
+     * 批量查询多个订单的订单项（IN 查询，避免 N+1）
+     */
+    List<OrderItem> selectByOrderIds(@Param("orderIds") List<Long> orderIds);
 }

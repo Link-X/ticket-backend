@@ -50,4 +50,9 @@ public interface ShowSessionMapper {
                          @Param("status") Integer status,
                          @Param("startTime") LocalDateTime startTime,
                          @Param("endTime") LocalDateTime endTime);
+
+    /**
+     * 按 ID 列表批量查询场次（IN 查询，避免 N+1）
+     */
+    List<ShowSession> selectByIds(@Param("ids") List<Long> ids);
 }

@@ -52,8 +52,11 @@
 
     <update id="updateStatusAndVerifyTime">
         UPDATE ticket
-        SET status = #{status}, verify_time = #{verifyTime}
+        SET status      = #{status},
+            verify_time = #{verifyTime},
+            update_time = NOW()
         WHERE id = #{id}
+          AND status = 0
     </update>
 
     <!-- 按订单 ID 批量作废全部票券 -->
@@ -71,5 +74,15 @@
             #{seatId}
         </foreach>
     </update>
+
+    <!-- 批量查询多个订单的票券（IN 查询，避免 N+1） -->
+    <select id="selectByOrderIds" resultMap="TicketResultMap">
+        SELECT id, order_id, seat_id, user_id, qr_code, ticket_no, status, verify_time, create_time, update_time
+        FROM ticket
+        WHERE order_id IN
+        <foreach collection="orderIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
 
 </mapper>

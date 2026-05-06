@@ -61,12 +61,14 @@
         LIMIT #{limit}
     </select>
 
-    <!-- 更新订单状态和支付时间 -->
+    <!-- 更新订单状态和支付时间（乐观锁：只更新待支付订单，防并发取消后仍被支付） -->
     <update id="updateStatusAndPayTime">
         UPDATE `order`
-        SET status   = #{status},
-            pay_time = #{payTime}
+        SET status      = #{status},
+            pay_time    = #{payTime},
+            update_time = NOW()
         WHERE id = #{id}
+          AND status = 0
     </update>
 
     <!-- 按用户查询订单列表（按创建时间倒序，分页），startTime/endTime 可选 -->

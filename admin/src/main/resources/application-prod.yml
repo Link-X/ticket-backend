@@ -17,6 +17,10 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
 
+snowflake:
+  worker-id: ${SNOWFLAKE_WORKER_ID:1}
+  data-center-id: 2
+
 logging:
   level:
     root: WARN

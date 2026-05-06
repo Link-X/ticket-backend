@@ -55,7 +55,6 @@ public class VerifyService {
      * @return 核销后的票券
      */
     private Ticket doVerify(Ticket ticket) {
-        // 检查票券状态
         if (ticket.getStatus() == 1) {
             throw new BusinessException(ErrorCode.TICKET_ALREADY_USED);
         }
@@ -63,10 +62,12 @@ public class VerifyService {
             throw new BusinessException(ErrorCode.ORDER_EXPIRED);
         }
 
-        // 更新票券状态为已使用(1)和核销时间
-        ticketMapper.updateStatusAndVerifyTime(ticket.getId(), 1, LocalDateTime.now());
+        // 原子 UPDATE WHERE status=0，受影响行为 0 说明已被并发核销
+        int affected = ticketMapper.updateStatusAndVerifyTime(ticket.getId(), 1, LocalDateTime.now());
+        if (affected == 0) {
+            throw new BusinessException(ErrorCode.TICKET_ALREADY_USED);
+        }
 
-        // 重新查询最新的票券信息
         return ticketMapper.selectById(ticket.getId());
     }
 }

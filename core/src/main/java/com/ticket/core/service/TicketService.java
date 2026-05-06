@@ -23,13 +23,14 @@ public class TicketService {
 
     private final OrderItemMapper orderItemMapper;
     private final TicketMapper ticketMapper;
-    /** 雪花算法 ID 生成器，workerId=1，dataCenterId=2 */
-    private final SnowflakeIdGenerator snowflake = new SnowflakeIdGenerator(1, 2);
+    private final SnowflakeIdGenerator snowflake;
 
     public TicketService(OrderItemMapper orderItemMapper,
-                         TicketMapper ticketMapper) {
+                         TicketMapper ticketMapper,
+                         SnowflakeIdGenerator snowflake) {
         this.orderItemMapper = orderItemMapper;
         this.ticketMapper = ticketMapper;
+        this.snowflake = snowflake;
     }
 
     /**
@@ -40,6 +41,12 @@ public class TicketService {
      * @return 生成的票券列表
      */
     public List<Ticket> generateTicketsForOrder(Long orderId, Long userId) {
+        // 幂等检查：MQ 重试时若票券已生成则直接返回，防止重复建票
+        List<Ticket> existing = ticketMapper.selectByOrderId(orderId);
+        if (!existing.isEmpty()) {
+            return existing;
+        }
+
         // 1. 查询订单项
         List<OrderItem> orderItems = orderItemMapper.selectByOrderId(orderId);
 

@@ -17,6 +17,10 @@ spring:
     username: guest
     password: guest
 
+snowflake:
+  worker-id: 1
+  data-center-id: 2
+
 logging:
   level:
     com.ticket: DEBUG

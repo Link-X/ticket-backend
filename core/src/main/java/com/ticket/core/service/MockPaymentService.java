@@ -21,15 +21,16 @@ public class MockPaymentService {
     private final OrderMapper orderMapper;
     private final PaymentMapper paymentMapper;
     private final PaymentSuccessProducer paymentSuccessProducer;
-
-    private final SnowflakeIdGenerator snowflake = new SnowflakeIdGenerator(1, 2);
+    private final SnowflakeIdGenerator snowflake;
 
     public MockPaymentService(OrderMapper orderMapper,
                               PaymentMapper paymentMapper,
-                              PaymentSuccessProducer paymentSuccessProducer) {
+                              PaymentSuccessProducer paymentSuccessProducer,
+                              SnowflakeIdGenerator snowflake) {
         this.orderMapper = orderMapper;
         this.paymentMapper = paymentMapper;
         this.paymentSuccessProducer = paymentSuccessProducer;
+        this.snowflake = snowflake;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -59,7 +60,10 @@ public class MockPaymentService {
         payment.setUpdateTime(now);
 
         paymentMapper.insert(payment);
-        orderMapper.updateStatusAndPayTime(order.getId(), 1, now);
+        int affected = orderMapper.updateStatusAndPayTime(order.getId(), 1, now);
+        if (affected == 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "订单已取消或状态变更，支付失败");
+        }
 
         // 事务提交后再发 MQ，避免 DB 回滚时消息已发出
         Long orderId = order.getId();
